@@ -231,7 +231,7 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
 
   // Seat Type Editing State
   const [newSeatTypeName, setNewSeatTypeName] = useState('');
-  const [newSeatTypeMode, setNewSeatTypeMode] = useState('Fixed');
+  const [newSeatTypeMode, setNewSeatTypeMode] = useState('');
   const [newSeatTypeCapMode, setNewSeatTypeCapMode] = useState('Unlimited');
   const [newSeatTypeMax, setNewSeatTypeMax] = useState(50);
 
@@ -489,7 +489,7 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
   const handleOpenAddSeatType = () => {
     setEditingSeatTypeId(null);
     setNewSeatTypeName('');
-    setNewSeatTypeMode('Fixed');
+    setNewSeatTypeMode('');
     setNewSeatTypeCapMode('Unlimited');
     setNewSeatTypeMax(50);
     setIsSeatTypeModalOpen(true);
@@ -507,6 +507,9 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
   const handleSaveSeatType = (e) => {
     e.preventDefault();
     if (!newSeatTypeName.trim()) return toast.error('Seat Type name is required.');
+    if (!editingSeatTypeId && newSeatTypeMode !== 'Fixed' && newSeatTypeMode !== 'Non-Fixed') {
+      return toast.error('Choose Fixed or Non-Fixed.');
+    }
 
     if (editingSeatTypeId) {
       setSeatTypes(prev => prev.map(st => st.id === editingSeatTypeId ? {
@@ -2932,6 +2935,7 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label" style={{ fontSize: '12px', fontWeight: 600 }}>Allocation Mode</label>
                   <select className="form-select" value={newSeatTypeMode} onChange={e => setNewSeatTypeMode(e.target.value)}>
+                    <option value="" disabled>Select allocation mode</option>
                     <option value="Fixed">Fixed (Assigned physical desk on map)</option>
                     <option value="Non-Fixed">Non-Fixed (Floating capacity)</option>
                   </select>

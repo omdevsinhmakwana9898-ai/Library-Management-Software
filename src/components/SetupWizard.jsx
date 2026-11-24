@@ -129,6 +129,10 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
   const [simpleEnd, setSimpleEnd] = useState(25);
   const [selectedSeatTypeId, setSelectedSeatTypeId] = useState('');
 
+  useEffect(() => {
+    setSelectedSeatTypeId('');
+  }, [selectedSectionId, selectedBranchId]);
+
   // Row based mode state
   const [rowConfigMode, setRowConfigMode] = useState('same'); // 'same' | 'different'
   const [rowNamesInput, setRowNamesInput] = useState('A, B, C');
@@ -220,8 +224,8 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
 
     const currentScopeSeatTypes = tempSeatTypes.filter(st => matchesScope(st, scope.resolvedBranchId, scope.resolvedSectionId));
     const fixedTypes = currentScopeSeatTypes.filter(st => st.allocationMode === 'Fixed');
-    
-    const stId = selectedSeatTypeId || fixedTypes[0]?.id || currentScopeSeatTypes[0]?.id;
+    const selectedInScope = currentScopeSeatTypes.some(st => st.id === selectedSeatTypeId && st.allocationMode === 'Fixed');
+    const stId = selectedInScope ? selectedSeatTypeId : (fixedTypes[0]?.id || '');
     if (!stId) return toast.error("Please configure a Fixed Seat Type for this section/branch before generating physical desks.");
 
     let addedCount = 0;
@@ -297,6 +301,9 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
     }
     if (step === 3) {
       if (tempSeatTypes.length === 0) return toast.error("Please configure at least one Seat Type.");
+      if (tempSeatTypes.some(st => st.allocationMode !== 'Fixed' && st.allocationMode !== 'Non-Fixed')) {
+        return toast.error('Choose Fixed or Non-Fixed for every seat type.');
+      }
     }
     if (step === 4) {
       const fixedTypes = tempSeatTypes.filter(st => st.allocationMode === 'Fixed');
@@ -665,7 +672,7 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
                     <label className="form-label" style={{ fontSize: '12px' }}>Allocation Mode</label>
                     <select 
                       className="form-select" 
-                      value={st.allocationMode || 'Fixed'} 
+                      value={st.allocationMode || ''} 
                       onChange={e => {
                         const mode = e.target.value;
                         setTempSeatTypes(tempSeatTypes.map(item => item.id === st.id ? {
@@ -676,6 +683,7 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
                         } : item));
                       }}
                     >
+                      <option value="" disabled>Select allocation mode</option>
                       <option value="Fixed">Fixed (Physical Desks)</option>
                       <option value="Non-Fixed">Non-Fixed (Capacity)</option>
                     </select>
@@ -742,7 +750,7 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
               setTempSeatTypes([...tempSeatTypes, {
                 id: `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
                 name: "",
-                allocationMode: 'Fixed',
+                allocationMode: '',
                 capacityMode: null,
                 maximumStudentsAllowed: null,
                 branchId: scope.resolvedBranchId || undefined,
@@ -804,7 +812,8 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label" style={{ fontSize: '11px' }}>Seat Type</label>
-                    <select className="form-select" value={selectedSeatTypeId || fixedSeatTypes[0]?.id} onChange={e => setSelectedSeatTypeId(e.target.value)}>
+                    <select className="form-select" value={fixedSeatTypes.some(st => st.id === selectedSeatTypeId) ? selectedSeatTypeId : ''} onChange={e => setSelectedSeatTypeId(e.target.value)}>
+                      <option value="">Select seat type</option>
                       {fixedSeatTypes.map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
                     </select>
                   </div>
@@ -825,7 +834,8 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
                     </div>
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="form-label" style={{ fontSize: '11px' }}>Seat Type</label>
-                      <select className="form-select" value={selectedSeatTypeId || fixedSeatTypes[0]?.id} onChange={e => setSelectedSeatTypeId(e.target.value)}>
+                      <select className="form-select" value={fixedSeatTypes.some(st => st.id === selectedSeatTypeId) ? selectedSeatTypeId : ''} onChange={e => setSelectedSeatTypeId(e.target.value)}>
+                        <option value="">Select seat type</option>
                         {fixedSeatTypes.map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
                       </select>
                     </div>

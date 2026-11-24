@@ -16,6 +16,10 @@ export const OAUTH_ERROR_MESSAGES = {
   not_configured: 'Google sign-in is not available right now.',
   google_not_linked: 'That Google account is not linked to a My Library OS account. Sign in with email or mobile, or link Google from your profile first.',
   invite_invalid: 'This invite link is invalid, expired or already used.',
+  invalid: 'This invite link is invalid, expired or already used.',
+  accepted: 'This invite was already accepted. Please sign in.',
+  expired: 'This invite link has expired.',
+  revoked: 'This invite has been revoked.',
   invite_email_mismatch: 'That Google account does not match the invited email. Use the invited email.',
   account_exists: 'An account with this email already exists. Sign in instead.',
 };
