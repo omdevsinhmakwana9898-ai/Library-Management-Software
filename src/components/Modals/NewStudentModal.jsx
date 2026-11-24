@@ -26,6 +26,7 @@ const formatFileSize = (bytes) => {
 };
 
 import { getCanonicalShifts, isShiftInPlan } from '../../utils/shiftUtils';
+import { childrenAfterSectionChange, shiftAfterPlanChange, shouldFilterPlansByShift } from '../../utils/admissionHierarchy';
 import { clientCanEditAmount } from '../../utils/amountPermission';
 import { getCanonicalSeatTypes, areSeatTypesEquivalent } from '../../utils/seatTypeUtils';
 
@@ -203,7 +204,9 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
         if (seatTypeId && p.seatTypeId && p.seatTypeId !== seatTypeId && !areSeatTypesEquivalent(seatTypes, p.seatTypeId, seatTypeId)) return false;
       }
       
-      if (shiftId) {
+      // In plan-first, shift is a child of plan — do not hide plans that omit the current shift
+      // (that made a newly chosen plan vanish from the list and look like a revert).
+      if (shouldFilterPlansByShift(admissionFlow) && shiftId) {
         if (!isShiftInPlan(shifts, p, shiftId)) return false;
       }
       return true;
@@ -274,6 +277,7 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
       }
       setSeatNo('');
       setPlanId('');
+      setShiftId('');
     }
   }, [branchId, sections, sectionId]);
 
@@ -294,45 +298,72 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
     if (branchSections.length === 1 && !sectionId) setSectionId(branchSections[0].id);
   }, [branches, branchSections, branchId, sectionId]);
 
-  // FLOW A: SEAT-FIRST -> When vacant seat & shift selected, auto-match valid plan
+  // Parent-wins handlers: changing section/plan never lets the child write the parent back.
+  const handleSectionChange = (nextSectionId) => {
+    setSectionId(nextSectionId);
+    const selectedPlan = plans.find(p => p.id === planId);
+    const selectedShift = shifts.find(sh => sh.id === shiftId);
+    const next = childrenAfterSectionChange({
+      sectionId: nextSectionId,
+      plan: selectedPlan,
+      planId,
+      shift: selectedShift,
+      shiftId,
+      shifts,
+      isShiftInPlan,
+    });
+    if (next.planId !== planId) setPlanId(next.planId);
+    if (next.shiftId !== shiftId) setShiftId(next.shiftId);
+    setSeatNo('');
+  };
+
+  const handlePlanChange = (nextPlanId) => {
+    setPlanId(nextPlanId);
+    const selectedPlan = plans.find(p => p.id === nextPlanId);
+    const nextShiftId = shiftAfterPlanChange({
+      plan: selectedPlan,
+      shiftId,
+      shifts,
+      isShiftInPlan,
+    });
+    if (nextShiftId !== shiftId) {
+      setShiftId(nextShiftId);
+      setSeatNo('');
+    }
+  };
+
+  // FLOW A: SEAT-FIRST -> when seat type or shift changes, auto-match a valid plan.
+  // Do not run when only planId changes, or a user-picked plan is overwritten by the current shift.
+  const prevSeatShiftRef = useRef(`${seatTypeId}|${shiftId}`);
   useEffect(() => {
+    const key = `${seatTypeId}|${shiftId}`;
+    const seatShiftChanged = prevSeatShiftRef.current !== key;
+    prevSeatShiftRef.current = key;
+    if (!seatShiftChanged) return;
     if (admissionFlow === 'seat-first' && seatTypeId && shiftId) {
       const matching = getMatchingPlans(libId, branchId, sectionId, seatTypeId, shiftId);
-      if (matching.length > 0) {
-        if (matching.length === 1 || !matching.some(p => p.id === planId)) {
-          setPlanId(matching[0].id);
-        }
+      if (matching.length > 0 && !matching.some(p => p.id === planId)) {
+        setPlanId(matching[0].id);
       }
     }
   }, [admissionFlow, seatTypeId, shiftId, branchId, sectionId, libId, getMatchingPlans, planId]);
 
-  // When Plan is selected, auto-select its first applicable shift if current shift is not applicable
+  // When a plan is selected, sync seat type and duration only. Never write section or shift
+  // from the plan — that overwrote a newer parent choice and looked like a revert.
   useEffect(() => {
-    if (planId) {
-      const selectedPlan = plans.find(p => p.id === planId);
-      if (selectedPlan) {
-        if (selectedPlan.seatTypeId) setSeatTypeId(selectedPlan.seatTypeId);
-        if (selectedPlan.sectionId) setSectionId(selectedPlan.sectionId);
-
-        const applicableShifts = validShifts.filter(sh => isShiftInPlan(shifts, selectedPlan, sh.id));
-        if (applicableShifts.length > 0) {
-          if (!shiftId || !isShiftInPlan(shifts, selectedPlan, shiftId)) {
-            setShiftId(applicableShifts[0].id);
-          }
-        }
-
-        // Auto-select duration from plan pricing
-        const pricing = selectedPlan.durationPricing || [];
-        if (pricing.length > 0) {
-          const matchPrice = pricing.find(dp => dp.durationMonths === durationMonths) || pricing[0];
-          setDurationMonths(matchPrice.durationMonths);
-          setBaseAmount(matchPrice.basePrice);
-          setDiscountType(matchPrice.discountType || 'None');
-          setDiscountValue(matchPrice.discountValue || 0);
-        }
-      }
+    if (!planId) return;
+    const selectedPlan = plans.find(p => p.id === planId);
+    if (!selectedPlan) return;
+    if (selectedPlan.seatTypeId) setSeatTypeId(selectedPlan.seatTypeId);
+    const pricing = selectedPlan.durationPricing || [];
+    if (pricing.length > 0) {
+      const matchPrice = pricing.find(dp => dp.durationMonths === durationMonths) || pricing[0];
+      setDurationMonths(matchPrice.durationMonths);
+      setBaseAmount(matchPrice.basePrice);
+      setDiscountType(matchPrice.discountType || 'None');
+      setDiscountValue(matchPrice.discountValue || 0);
     }
-  }, [planId, plans, validShifts]);
+  }, [planId, plans]);
 
   // When Duration is changed for current Plan, recalculate basePrice and discount
   const handleDurationChange = (dur) => {
@@ -772,7 +803,7 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
                 {branchSections.length > 1 && (
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label" style={{ fontSize: '12px' }}>Section</label>
-                    <select className="form-select" value={sectionId} onChange={e => setSectionId(e.target.value)}>
+                    <select className="form-select" value={sectionId} onChange={e => handleSectionChange(e.target.value)}>
                       <option value="">All Sections</option>
                       {branchSections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
@@ -795,7 +826,7 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
                   {/* Plan first */}
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label" style={{ fontSize: '12px' }}>Fee Plan *</label>
-                    <select className="form-select" value={planId} onChange={e => setPlanId(e.target.value)}>
+                    <select className="form-select" value={planId} onChange={e => handlePlanChange(e.target.value)}>
                       <option value="">-- Select Plan --</option>
                       {validPlans.map(p => (
                         <option key={p.id} value={p.id}>{p.name}</option>
@@ -811,7 +842,7 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
                       <option value="">-- Select Shift --</option>
                       {validShifts.filter(sh => {
                         const currentPlan = plans.find(p => p.id === planId);
-                        return !currentPlan || currentPlan.shiftIds?.includes(sh.id);
+                        return !currentPlan || isShiftInPlan(shifts, currentPlan, sh.id);
                       }).map(sh => (
                         <option key={sh.id} value={sh.id}>{sh.name}</option>
                       ))}
@@ -874,7 +905,7 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
 
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label" style={{ fontSize: '12px' }}>Auto-Matched Fee Plan *</label>
-                    <select className="form-select" value={planId} onChange={e => setPlanId(e.target.value)}>
+                    <select className="form-select" value={planId} onChange={e => handlePlanChange(e.target.value)}>
                       <option value="">-- Select Plan --</option>
                       {validPlans.map(p => (
                         <option key={p.id} value={p.id}>{p.name}</option>

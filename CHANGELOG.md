@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-24 (IST)
+
+- **New Admission section, plan and shift no longer revert** (branch `fix/admission-section-plan-shift`, not deployed). In New Admission, changing the section after a plan and shift were chosen used to snap the section back, because the selected plan still belonged to the old section and a plan effect wrote that section again. Changing the plan after a shift was chosen had the same kind of loop: the plan list was filtered by the old shift, so the new plan disappeared. The parent choice now wins: changing section keeps the plan and shift only if they are still valid for the new section, otherwise they clear; changing plan keeps the shift only if it is still on the new plan, otherwise it clears. The plan no longer overwrites the section. Bulk admission and renewal do not use this effect (bulk auto-assigns slots; renewal already updates the shift in its plan onChange), so they were left as they are. Nothing was merged or deployed.
+
+
 ## 2026-11-20 (IST)
 
 - **Print receipt no longer clips or overlaps** (branch `fix/print-receipt-overflow`, not deployed). The fee receipt print layout was a fixed-height A4 half-page, so Received by, Instructions, and the footer could overlap the amount table, and the Receipt No / Period row and copy badge could clip on a narrow phone print preview. The slip is now width-safe (box-sizing, max-width 100%, wrapping text), and each copy can grow instead of overflowing a locked 148mm box. Student and library copies stay on one A4 page when they fit, and otherwise break cleanly between copies. The library logo and the student photo (or initials if there is no photo) are larger: 56px on screen, 15mm / 18mm on the printed slip, and 56pt on the WhatsApp PDF. That PDF now includes the library logo and the student photo (or initials), waiting on and embedding the image bytes before the file is built. Nothing was merged or deployed.
