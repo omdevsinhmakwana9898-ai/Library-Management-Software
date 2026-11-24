@@ -215,7 +215,7 @@ export default function Showcase() {
             <div className="flex bg-stone-100">
               <aside className="hidden w-56 shrink-0 flex-col gap-1 border-r border-stone-200 bg-white p-3 md:flex">
                 <div className="mb-3 flex items-center gap-2 px-2 py-2">
-                  <img src="/logo-icon.png" alt="" className="h-7 w-7" />
+                  <img src="/logo-icon.png" alt="" width="28" height="28" className="h-7 w-7" loading="lazy" decoding="async" />
                   <div className="leading-tight">
                     <p className="text-sm font-bold text-ink-950">Your Library</p>
                     <p className="text-[11px] text-stone-500">My Library OS</p>

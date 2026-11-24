@@ -3,7 +3,11 @@
 @tailwind utilities;
 
 @layer base {
-  html { scroll-behavior: smooth; -webkit-tap-highlight-color: transparent; }
+  html, body, #root {
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  html { scroll-behavior: auto; }
   body { font-family: 'General Sans', ui-sans-serif, system-ui, sans-serif; }
   h1, h2, h3, h4 { font-family: 'Satoshi', ui-sans-serif, system-ui, sans-serif; letter-spacing: -0.02em; }
   :focus-visible { outline: 2px solid #E8B54A; outline-offset: 3px; border-radius: 8px; }
