@@ -483,12 +483,13 @@ export function LoginScreen() {
                     <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '8px 0 0' }}>Optional. Add it so you can reset your password on WhatsApp later.</p>
                   </div>
                   <div className="form-group">
-                    <label className="form-label" htmlFor="invite-password">Password</label>
-                    <input id="invite-password" className="form-input" type="password" autoComplete="new-password" value={invitePassword} onChange={e => setInvitePassword(e.target.value)} required />
+                    <label className="form-label" htmlFor="invite-password">Choose a password</label>
+                    <input id="invite-password" className="form-input" type="password" autoComplete="new-password" minLength={8} value={invitePassword} onChange={e => setInvitePassword(e.target.value)} required />
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '8px 0 0' }}>At least 8 characters. You will be signed in after you join.</p>
                   </div>
                   <div className="form-group">
                     <label className="form-label" htmlFor="invite-confirm-password">Confirm password</label>
-                    <input id="invite-confirm-password" className="form-input" type="password" autoComplete="new-password" value={inviteConfirm} onChange={e => setInviteConfirm(e.target.value)} required />
+                    <input id="invite-confirm-password" className="form-input" type="password" autoComplete="new-password" minLength={8} value={inviteConfirm} onChange={e => setInviteConfirm(e.target.value)} required />
                   </div>
 
                   {alertMessage && <div role="alert" style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{alertMessage}</div>}

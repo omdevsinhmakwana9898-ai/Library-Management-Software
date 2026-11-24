@@ -23,6 +23,16 @@ test('invite accept form has an optional mobile field', () => {
   assert.match(login, /inviteMobile\.trim\(\) \? \{ mobile: inviteMobile\.trim\(\) \}/);
 });
 
+test('invite accept already lets staff choose a password and signs them in', () => {
+  assert.match(login, /Choose a password/);
+  assert.match(login, /id="invite-password"/);
+  assert.match(login, /id="invite-confirm-password"/);
+  assert.match(login, /At least 8 characters\. You will be signed in after you join\./);
+  assert.match(login, /invitePassword\.length < 8/);
+  assert.match(login, /invitePassword !== inviteConfirm/);
+  assert.match(login, /completeLogin\(result\)/);
+});
+
 test('desk seat type resets on scope change and stays in the current section', () => {
   assert.match(wizard, /setSelectedSeatTypeId\(''\)/);
   assert.match(wizard, /\[selectedSectionId, selectedBranchId\]/);
