@@ -12,40 +12,28 @@ function hasWebGL() {
   }
 }
 
-function useReducedMotion() {
-  const [reduced, setReduced] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const on = () => setReduced(mq.matches);
-    mq.addEventListener('change', on);
-    return () => mq.removeEventListener('change', on);
-  }, []);
-  return reduced;
-}
-
 /**
- * Lazy-loads the three.js hero only after first paint (idle), only if WebGL exists,
- * pauses rendering when offscreen and renders a still frame for reduced-motion users.
+ * Shows a static hall immediately. On desktop only, lazy-loads the three.js
+ * hero after first paint. The canvas never captures page scroll (pointer-events:
+ * none). Mobile and reduced-motion stay on the static hall.
  */
-export default function Scene3D({ eventSource }) {
+export default function Scene3D({ still = false }) {
   const ref = useRef(null);
-  const reduced = useReducedMotion();
   const [ready, setReady] = useState(false);
-  const [supported, setSupported] = useState(true);
+  const [supported, setSupported] = useState(false);
   const [visible, setVisible] = useState(true);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    if (!hasWebGL()) {
-      setSupported(false);
-      return;
-    }
+    const narrow = window.matchMedia('(max-width: 767px)').matches;
+    if (still || narrow || !hasWebGL()) return;
     const idle = window.requestIdleCallback || ((cb) => setTimeout(cb, 200));
-    const id = idle(() => setReady(true), { timeout: 1200 });
+    const id = idle(() => {
+      setSupported(true);
+      setReady(true);
+    }, { timeout: 1200 });
     return () => (window.cancelIdleCallback ? window.cancelIdleCallback(id) : clearTimeout(id));
-  }, []);
+  }, [still]);
 
   useEffect(() => {
     if (!ref.current) return;
@@ -55,18 +43,16 @@ export default function Scene3D({ eventSource }) {
   }, []);
 
   return (
-    <div ref={ref} className="absolute inset-0">
+    <div ref={ref} className="pointer-events-none absolute inset-0">
       {(!supported || !loaded) && (
-        <div className={`absolute inset-0 transition-opacity duration-700 ${loaded ? 'opacity-0' : 'opacity-100'}`}>
+        <div className={`absolute inset-0 ${loaded ? 'opacity-0' : 'opacity-100'}`}>
           <StaticHall />
         </div>
       )}
       {supported && ready && (
         <Suspense fallback={null}>
-          <div
-            className={`absolute inset-0 transition-opacity duration-1000 ${loaded ? 'opacity-100' : 'opacity-0'}`}
-          >
-            <HeroScene eventSource={eventSource} active={visible} still={reduced} onReady={() => setTimeout(() => setLoaded(true), 120)} />
+          <div className={`absolute inset-0 ${loaded ? 'opacity-100' : 'opacity-0'}`}>
+            <HeroScene active={visible} still={still} onReady={() => setLoaded(true)} />
           </div>
         </Suspense>
       )}

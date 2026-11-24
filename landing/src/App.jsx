@@ -1,15 +1,12 @@
+import { lazy, Suspense } from 'react';
 import Nav from './components/Nav.jsx';
 import Hero from './components/Hero.jsx';
-import Features from './components/Features.jsx';
-import Showcase from './components/Showcase.jsx';
-import HowItWorks from './components/HowItWorks.jsx';
-import Pricing from './components/Pricing.jsx';
-import FAQ from './components/FAQ.jsx';
-import Footer, { FinalCTA } from './components/Footer.jsx';
 import { usePathname, LEGAL_ROUTES } from './router.js';
 import { DEMO_PATH } from './config.js';
 import { LegalRoute } from './pages/LegalPages.jsx';
 import { DemoPage } from './pages/DemoPage.jsx';
+
+const HomeBelowFold = lazy(() => import('./components/HomeBelowFold.jsx'));
 
 function Home() {
   return (
@@ -20,14 +17,10 @@ function Home() {
       <Nav />
       <main id="main">
         <Hero />
-        <Features />
-        <Showcase />
-        <HowItWorks />
-        <Pricing />
-        <FAQ />
-        <FinalCTA />
+        <Suspense fallback={null}>
+          <HomeBelowFold />
+        </Suspense>
       </main>
-      <Footer />
     </>
   );
 }

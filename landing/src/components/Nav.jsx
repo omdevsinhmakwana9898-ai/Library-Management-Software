@@ -13,7 +13,7 @@ const links = [
 export function Logo({ href = '#top', className = '' }) {
   return (
     <a href={href} className={`flex min-w-0 cursor-pointer items-center gap-2.5 ${className}`} aria-label={`${BRAND} home`}>
-      <img src="/logo-icon.png" alt="" width="32" height="32" className="h-8 w-8 shrink-0" />
+      <img src="/logo-icon.png" alt="" width="32" height="32" className="h-8 w-8 shrink-0" decoding="async" fetchPriority="high" />
       <span className="font-display whitespace-nowrap text-base font-bold tracking-tight text-white sm:text-lg">
         My Library <span className="text-[#1A6FFF]">OS</span>
       </span>
