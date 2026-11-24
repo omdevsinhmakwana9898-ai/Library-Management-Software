@@ -186,3 +186,20 @@ export function getAllConfigurationScopes(branches = [], sections = []) {
 
   return scopes;
 }
+
+/**
+ * Library Settings entry.
+ * 2+ branches: owner must pick a branch first.
+ * 0 or 1 branch: open settings directly. One branch is selected for them.
+ * Zero branches stay at library scope (`all` — no branch id).
+ */
+export function librarySettingsBranchAccess(branches = []) {
+  const list = Array.isArray(branches) ? branches.filter(b => b && b.id) : [];
+  if (list.length > 1) {
+    return { showBranchPicker: true, openDirectly: false, selectedBranchId: null };
+  }
+  if (list.length === 1) {
+    return { showBranchPicker: false, openDirectly: true, selectedBranchId: list[0].id };
+  }
+  return { showBranchPicker: false, openDirectly: true, selectedBranchId: 'all' };
+}

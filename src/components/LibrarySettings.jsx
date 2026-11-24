@@ -12,7 +12,7 @@ import { NumericInput } from './NumericInput';
 import { SetupWizard } from './SetupWizard';
 import { navigateTo } from '../utils/whatsappStatus';
 import { TeamAccess } from './TeamAccess';
-import { resolveConfigurationScope, matchesScope } from '../utils/scopeResolver';
+import { resolveConfigurationScope, matchesScope, librarySettingsBranchAccess } from '../utils/scopeResolver';
 import { 
   STAFF_MODULES, STAFF_ACTIONS, STAFF_ROLES, 
   createEmptyPermissions, getDefaultPermissionsForRole, countAllowedActions, sanitizeStaffPermissions,
@@ -52,6 +52,7 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
 
   // Navigation tab for clean organization (Problem 22: Level 2 Category Tabs)
   const [activeTab, setActiveTab] = useState('plans'); // 'plans' | 'shifts' | 'seatTypes' | 'sections' | 'branches' | 'admission' | 'billing' | 'whatsapp' | 'staff' | 'data'
+  // Stay on the branch list until the owner picks one. 0 or 1 branch skips that screen.
   const [viewLevel, setViewLevel] = useState('branches'); // 'branches' | 'modules' | 'module-view'
 
   // Setup Wizard Modal State
@@ -59,9 +60,23 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
   const setupStatus = getSetupStatus ? getSetupStatus() : (settings.isSetupComplete ? 'COMPLETED' : 'NOT_STARTED');
 
   // Canonical Scope State (Level 1: Branch Scope)
-  const [selectedBranchId, setSelectedBranchId] = useState(activeBranchId !== 'all' ? activeBranchId : (branches[0]?.id || 'all'));
+  const branchAccess = librarySettingsBranchAccess(branches);
+  const showBranchPicker = branchAccess.showBranchPicker;
+  // Picker is only the first screen when two or more branches exist.
+  const settingsView = showBranchPicker ? viewLevel : (viewLevel === 'branches' ? 'modules' : viewLevel);
+  const [selectedBranchId, setSelectedBranchId] = useState(() => {
+    const access = librarySettingsBranchAccess(branches);
+    if (!access.showBranchPicker) return access.selectedBranchId;
+    return activeBranchId !== 'all' ? activeBranchId : (branches[0]?.id || 'all');
+  });
   const [selectedSectionId, setSelectedSectionId] = useState('');
   const [scopeFilterMode, setScopeFilterMode] = useState('all'); // 'all' | 'current'
+
+  React.useEffect(() => {
+    if (!showBranchPicker && branchAccess.selectedBranchId != null) {
+      setSelectedBranchId(branchAccess.selectedBranchId);
+    }
+  }, [showBranchPicker, branchAccess.selectedBranchId]);
 
   const scope = resolveConfigurationScope({
     branches,
@@ -1016,7 +1031,7 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
       {/* ======================================================== */}
       {/* LEVEL 1: VERTICAL BRANCH LIST (Problem 22) */}
       {/* ======================================================== */}
-      {viewLevel === 'branches' && (
+      {settingsView === 'branches' && (
         <div className="premium-card">
           <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '20px' }}>Library Settings</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1037,12 +1052,14 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
       {/* ======================================================== */}
       {/* LEVEL 2: VERTICAL CATEGORY LIST (Problem 22) */}
       {/* ======================================================== */}
-      {viewLevel === 'modules' && (
+      {settingsView === 'modules' && (
         <div className="premium-card">
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-            <button className="btn btn-ghost" onClick={() => setViewLevel('branches')} style={{ padding: '8px' }}>
-              <ChevronRight size={18} style={{ transform: 'rotate(180deg)' }} /> Back
-            </button>
+            {showBranchPicker && (
+              <button className="btn btn-ghost" onClick={() => setViewLevel('branches')} style={{ padding: '8px' }}>
+                <ChevronRight size={18} style={{ transform: 'rotate(180deg)' }} /> Back
+              </button>
+            )}
             <h2 style={{ fontSize: '20px', fontWeight: 700, margin: 0 }}>
               {branches.find(b => b.id === selectedBranchId)?.name || 'Library Options'}
             </h2>
@@ -1077,18 +1094,18 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
       {/* ======================================================== */}
       {/* LEVEL 3: MODULE VIEW WITH BACK BUTTON */}
       {/* ======================================================== */}
-      {viewLevel === 'module-view' && (
+      {settingsView === 'module-view' && (
         <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
           <button className="btn btn-ghost" onClick={() => setViewLevel('modules')} style={{ padding: '8px' }}>
             <ChevronRight size={18} style={{ transform: 'rotate(180deg)' }} /> Back to Options
           </button>
           <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
-            {branches.find(b => b.id === selectedBranchId)?.name} / {activeTab}
+            {branches.find(b => b.id === selectedBranchId)?.name || (branches.length === 0 ? 'Library' : '')} / {activeTab}
           </span>
         </div>
       )}
 
-      {viewLevel === 'module-view' && (
+      {settingsView === 'module-view' && (
         <div style={{ display: 'block' }}>
 
       {/* ======================================================== */}
