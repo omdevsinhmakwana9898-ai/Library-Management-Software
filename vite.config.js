@@ -5,8 +5,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   return {
     plugins: [react()],
+    appType: 'spa',
     server: {
-      port: 3003,
+      port: 3001,
       open: !env.CI && !env.NO_OPEN,
       // In dev, /api is proxied to the local backend unless VITE_API_URL points elsewhere
       proxy: {

@@ -114,7 +114,7 @@ body {
   box-shadow: var(--shadow-md);
 }
 .btn-secondary {
-  background: #ffffff;
+  background: var(--bg-surface);
   border-color: var(--border-strong);
   color: var(--text-primary);
   box-shadow: var(--shadow-sm);
@@ -167,14 +167,20 @@ body {
 /* Premium Data Grid */
 .table-container {
   width: 100%;
+  max-width: 100%;
   overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-light);
   background: var(--bg-surface);
   box-shadow: var(--shadow-sm);
 }
 .data-grid {
-  width: 100%;
+  /* Size columns to their content so records stay on a single line. */
+  width: auto;
+  min-width: 100%;
+  table-layout: auto;
   border-collapse: separate;
   border-spacing: 0;
 }
@@ -188,6 +194,7 @@ body {
   letter-spacing: 0.05em;
   border-bottom: 1px solid var(--border-light);
   background: #fafafa;
+  white-space: nowrap;
 }
 .data-grid td {
   padding: 16px 20px;
@@ -195,6 +202,37 @@ body {
   color: var(--text-primary);
   border-bottom: 1px solid var(--border-light);
   transition: background 0.2s ease;
+}
+
+/* Desktop record grids never wrap: each record occupies a single line. */
+@media (min-width: 768px) {
+  .data-grid th,
+  .data-grid td {
+    white-space: nowrap;
+  }
+}
+
+/* Helpers for single-line record cells */
+.cell-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.cell-meta {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.cell-truncate {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 .data-grid tr:last-child td {
   border-bottom: none;
@@ -325,6 +363,33 @@ body {
   margin: 4px 0;
 }
 
+/* Portal-rendered action menu (BUG-02). It is mounted on document.body, so
+   its item styling must not depend on the original parent container. */
+.action-menu {
+  color: var(--text-primary);
+  pointer-events: auto;
+}
+.action-menu .dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  color: var(--text-primary);
+  background: transparent;
+  white-space: nowrap;
+}
+.action-menu .dropdown-item svg { flex-shrink: 0; }
+.action-menu .dropdown-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.action-menu .dropdown-item.danger { color: #dc2626; }
+.action-menu .dropdown-item.danger:hover {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
 /* 3D Seat Map Base */
 .seat-map-container {
   perspective: 1200px;
@@ -363,28 +428,555 @@ body {
   z-index: 10;
 }
 
-/* Seat Status Colors */
-.seat-available { background: #f0fdf4; border-color: #bbf7d0; color: #16a34a; }
+/* Seat colours. Occupied, payment, and maintenance numbers stay white.
+   Vacant occupancy seats are grey-white, so their numbers must be dark. */
+.seat-3d .seat-number { color: #ffffff; font-weight: 700; }
+.seat-available { background: #f8fafc; border-color: #cbd5e1; color: #0f172a; }
+.seat-3d.seat-available .seat-number { color: #0f172a; }
 .seat-disabled { background: #e5e7eb; border-color: #d1d5db; color: #9ca3af; cursor: not-allowed; }
-.seat-occupied-male { background: #eff6ff; border-color: #93c5fd; color: #1e3a8a; }
-.seat-occupied-female { background: #fdf2f8; border-color: #f9a8d4; color: #831843; }
+.seat-occupied-male { background: #2563eb; border-color: #1d4ed8; color: #ffffff; }
+.seat-occupied-female { background: #db2777; border-color: #be185d; color: #ffffff; }
 .seat-expiring { background: #fffbeb; border-color: #fcd34d; color: #92400e; }
 .seat-expired { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
-.seat-maintenance { background: #fef08a; border-color: #fde047; color: #854d0e; }
-.seat-unavailable { background: #f1f5f9; border-color: #cbd5e1; color: #475569; opacity: 0.5; }
+.seat-maintenance { background: #d97706; border-color: #b45309; color: #ffffff; }
+.seat-unavailable { background: #64748b; border-color: #475569; color: #ffffff; opacity: 1; }
+.seat-paid { background: #16a34a; border-color: #15803d; color: #ffffff; }
+.seat-unpaid { background: #dc2626; border-color: #b91c1c; color: #ffffff; }
+.seat-mixed { background: #eab308; border-color: #ca8a04; color: #ffffff; }
+.seat-unassigned { background: #9ca3af; border-color: #6b7280; color: #ffffff; }
 .seat-selected { box-shadow: 0 0 0 3px var(--brand-primary); transform: scale(1.05); z-index: 20; border-color: var(--brand-primary); }
 .seat-selected-outline { outline: 3px solid #16a34a !important; outline-offset: 2px !important; transform: scale(1.04); z-index: 20; }
 
-/* Print */
+.seat-view-switcher { display: flex; gap: 4px; background: #fff; padding: 4px; border-radius: 8px; border: 1px solid var(--border-light); }
+.seat-view-switcher button[aria-pressed="true"] { background: var(--brand-primary); color: #fff; }
+.seat-view-switcher button { border: none; background: transparent; padding: 6px 14px; border-radius: 6px; font-weight: 600; font-size: 13px; cursor: pointer; color: var(--text-secondary); }
+.seat-legend { display: flex; gap: 16px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+.seat-legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+.seat-photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; width: 100%; }
+.seat-photo-tile { display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 10px; border: 1px solid var(--border-light); border-radius: 12px; background: #fff; cursor: pointer; text-align: left; }
+.seat-photo-img { width: 100%; height: 148px; object-fit: cover; border-radius: 8px; background: #f1f5f9; }
+.seat-photo-empty { width: 100%; height: 148px; border-radius: 8px; background: #f1f5f9; color: #475569; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+.seat-photo-name { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+.seat-photo-desk { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.seat-photo-preview-img { width: 100%; max-height: 320px; object-fit: contain; border-radius: 8px; background: #f8fafc; }
+
+/* Receipt slip: on-screen preview and the printed half-page share one layout. */
+.receipt-modal { max-width: 440px; }
+.receipt-modal-body {
+  background: #ffffff;
+  color: #111111;
+  padding: 14px 16px 16px;
+}
+.receipt-modal-body > .receipt-seg { margin-bottom: 12px; }
+.receipt-modal-footer {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+.receipt-modal-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.receipt-seg {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  padding: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-main);
+  gap: 3px;
+}
+.receipt-seg button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 8px;
+  min-height: 36px;
+  padding: 7px 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.receipt-seg {
+  background: #f4f4f5;
+  border-color: #d4d4d8;
+}
+.receipt-seg button { color: #3f3f46; }
+.receipt-seg button.is-selected {
+  background: #fff;
+  color: #111;
+  box-shadow: 0 0 0 1px #d4d4d8;
+  font-weight: 700;
+}
+
+.receipt-preview { display: flex; flex-direction: column; min-width: 0; max-width: 100%; }
+.receipt-preview,
+.receipt-slip,
+.receipt-slip-head,
+.receipt-slip-brand,
+.receipt-slip-id,
+.receipt-slip-aside,
+.receipt-info-grid,
+.receipt-student,
+.receipt-pay,
+.receipt-table-wrap,
+.receipt-items,
+.receipt-instructions,
+.receipt-print-sheet,
+.receipt-a4,
+.receipt-half {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+.receipt-slip {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  background: #fff;
+  color: #111;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 14px;
+  line-height: 1.35;
+  overflow: visible;
+}
+.receipt-slip-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+.receipt-slip-brand { display: flex; gap: 8px; min-width: 0; flex: 1; align-items: flex-start; }
+.receipt-slip-id { min-width: 0; }
+.receipt-logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  flex-shrink: 0;
+  display: block;
+}
+.receipt-lib-name {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.15;
+  font-weight: 800;
+  color: #111;
+  overflow-wrap: anywhere;
+}
+.receipt-lib-meta { margin: 2px 0 0; color: #333; font-size: 12px; line-height: 1.3; overflow-wrap: anywhere; }
+.receipt-slip-aside {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 46%;
+}
+.receipt-stamp {
+  display: inline-block;
+  border: 2px solid #111;
+  box-shadow: inset 0 0 0 1px #111;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 1.15;
+  text-align: center;
+  text-transform: uppercase;
+  color: #111;
+  background: #fff;
+  transform: rotate(-8deg);
+}
+.receipt-stamp.is-long {
+  transform: none;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  max-width: 108px;
+}
+.receipt-stamp,
+.receipt-copy-label {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.receipt-copy-label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #111;
+  text-align: right;
+}
+
+.receipt-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 10px;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fafafa;
+}
+.receipt-info-grid > div {
+  min-width: 0;
+  padding: 6px 8px;
+  border-right: 1px solid #e5e5e5;
+  border-bottom: 1px solid #e5e5e5;
+}
+.receipt-info-grid > div:nth-child(2n) { border-right: none; }
+.receipt-info-grid > div:nth-last-child(-n+2) { border-bottom: none; }
+.receipt-info-grid span,
+.receipt-k {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #525252;
+}
+.receipt-info-grid strong { display: block; margin-top: 1px; font-size: 13px; font-weight: 700; color: #111; overflow-wrap: anywhere; }
+
+.receipt-student {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  min-width: 0;
+}
+.receipt-photo,
+.receipt-initials {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+}
+.receipt-photo {
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #d4d4d4;
+  background: #f5f5f5;
+}
+.receipt-initials {
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid #d4d4d4;
+  background: #f3f4f6;
+  color: #111;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.receipt-student-main { min-width: 0; }
+.receipt-student-name { display: block; font-size: 15px; line-height: 1.2; overflow-wrap: anywhere; }
+.receipt-student-meta { display: flex; flex-wrap: wrap; gap: 3px 10px; margin-top: 3px; }
+.receipt-student-meta span { font-size: 12px; font-weight: 700; color: #111; overflow-wrap: anywhere; }
+.receipt-student-meta em { font-style: normal; font-weight: 600; color: #525252; margin-right: 3px; }
+
+.receipt-pay {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding: 7px 8px;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  background: #fafafa;
+}
+.receipt-pay strong { font-size: 13px; }
+.receipt-pay-ref { min-width: 0; text-align: right; }
+.receipt-pay-ref strong { display: block; overflow-wrap: anywhere; }
+.receipt-split { font-weight: 600; color: #222; font-size: 12px; margin-top: 2px; }
+
+.receipt-table-wrap {
+  margin-top: 8px;
+  border: 1px solid #d4d4d4;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.receipt-items { width: 100%; border-collapse: collapse; }
+.receipt-items th {
+  text-align: left;
+  padding: 6px 8px;
+  background: #f5f5f5;
+  border-bottom: 1px solid #d4d4d4;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #333;
+}
+.receipt-items td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #eee;
+  font-size: 13px;
+  color: #111;
+}
+.receipt-items .num { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.receipt-net td {
+  background: #f4f4f4;
+  border-bottom: none;
+  border-top: 2px solid #111;
+  font-weight: 800;
+  font-size: 16px;
+}
+
+.receipt-words { margin: 8px 2px 0; font-weight: 700; font-size: 13px; overflow-wrap: anywhere; }
+.receipt-words span { display: block; font-weight: 700; color: #404040; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 1px; }
+
+.receipt-instructions { margin: 10px 2px 8px; padding: 8px 10px; border: 1px solid #d4d4d4; border-radius: 6px; background: #fafafa; text-align: left; }
+.receipt-instructions-title { margin: 0 0 6px; font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #111; }
+.receipt-instructions ul { margin: 0; padding: 0 0 0 1.15em; }
+.receipt-instructions li { margin: 0 0 3px; font-size: 12px; line-height: 1.45; color: #171717; }
+.receipt-slip-foot { margin-top: 8px; padding-top: 6px; border-top: 1px solid #e5e5e5; text-align: center; }
+.receipt-terms { margin: 0; color: #404040; font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+.receipt-powered { margin: 3px 0 0; color: #111; font-weight: 800; font-size: 11px; letter-spacing: 0.02em; }
+
+.receipt-preview .receipt-cut {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 2px;
+  color: #525252;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.receipt-preview .receipt-cut::before,
+.receipt-preview .receipt-cut::after {
+  content: "";
+  flex: 1;
+  border-top: 1px dashed #737373;
+}
+.receipt-preview .receipt-cut span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.receipt-preview .receipt-half { display: contents; }
+
+/* Off-screen until print so the logo still loads. One A4 page; a single copy uses the top half only. */
+.receipt-print-sheet {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 210mm;
+  max-width: 100%;
+  height: auto;
+  min-height: 296mm;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateX(-200vw);
+  background: #fff;
+  color: #111;
+  box-sizing: border-box;
+}
+.receipt-a4 {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  min-height: 296mm;
+  overflow: visible;
+  background: #fff;
+  color: #111;
+  box-sizing: border-box;
+}
+
 @media print {
-  body * { visibility: hidden; }
-  .printable-receipt, .printable-receipt * { visibility: visible; }
-  .printable-receipt {
-    position: absolute; left: 0; top: 0; width: 100%;
-    max-width: 80mm; padding: 10px; background: #fff !important;
-    color: #000 !important; font-family: monospace; font-size: 12px;
+  @page { size: A4 portrait; margin: 0; }
+  @page receipt-page { size: A4 portrait; margin: 0; }
+  body:has(.receipt-print-sheet) {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-sizing: border-box !important;
   }
-  .no-print { display: none !important; }
+  body:has(.receipt-print-sheet) > *:not(.receipt-print-sheet) { display: none !important; }
+  .receipt-print-sheet {
+    page: receipt-page;
+    display: block !important;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    visibility: visible !important;
+    transform: none !important;
+    pointer-events: auto;
+    background: #fff !important;
+    color: #111 !important;
+    box-sizing: border-box !important;
+  }
+  .receipt-a4 {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+    box-sizing: border-box;
+  }
+  .receipt-half {
+    position: relative;
+    left: auto;
+    top: auto;
+    width: 100%;
+    max-width: 100%;
+    min-height: 148mm;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    box-sizing: border-box;
+    padding: 3.5mm 7mm 3mm;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .receipt-half-top { padding-bottom: 4mm; }
+  .receipt-half-bottom { padding-top: 4mm; }
+  .receipt-half .receipt-slip {
+    width: 100%;
+    max-width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    display: flex;
+    flex-direction: column;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    font-size: 11pt;
+    line-height: 1.2;
+    color: #111;
+    box-sizing: border-box;
+  }
+  .receipt-half .receipt-slip > * { flex-shrink: 0; min-width: 0; max-width: 100%; }
+  .receipt-half .receipt-slip-foot { margin-top: auto; }
+  .receipt-print-sheet .receipt-cut {
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
+    z-index: 2;
+    display: block;
+    height: 0;
+    min-height: 0;
+    max-height: 0;
+    margin: 0 7mm;
+    padding: 0;
+    overflow: visible;
+    line-height: 0;
+    font-size: 0;
+    transform: none;
+    color: #333;
+  }
+  .receipt-print-sheet .receipt-cut::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    border-top: 0.3mm dashed #525252;
+    transform: translateY(-50%);
+  }
+  .receipt-print-sheet .receipt-cut::after { content: none; }
+  .receipt-print-sheet .receipt-cut span {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    transform: translate(-50%, -50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 1.2mm;
+    padding: 0 2mm;
+    background: #fff;
+    color: #333;
+    font-size: 8pt;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    line-height: 1;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .receipt-logo { width: 15mm; height: 15mm; }
+  .receipt-lib-name { font-size: 14pt; }
+  .receipt-lib-meta { font-size: 9pt; color: #222; }
+  .receipt-stamp { font-size: 9.5pt; padding: 0.5mm 2.2mm; }
+  .receipt-stamp.is-long { font-size: 8pt; max-width: 36mm; }
+  .receipt-copy-label { font-size: 9pt; }
+  .receipt-info-grid {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr) minmax(0, 1.7fr) minmax(0, 0.95fr);
+    margin-top: 1.6mm;
+    width: 100%;
+    max-width: 100%;
+  }
+  .receipt-info-grid > div { border-bottom: none; border-right: 1px solid #e5e5e5; padding: 1mm 1.6mm; }
+  .receipt-info-grid > div:nth-child(2n) { border-right: 1px solid #e5e5e5; }
+  .receipt-info-grid > div:last-child { border-right: none; }
+  .receipt-info-grid span, .receipt-k { font-size: 7.5pt; color: #333; }
+  .receipt-info-grid strong { font-size: 10pt; overflow-wrap: anywhere; }
+  .receipt-info-period strong { white-space: normal; overflow-wrap: anywhere; }
+  .receipt-student { margin-top: 1.3mm; padding: 1.1mm 1.8mm; }
+  .receipt-photo { width: 18mm; height: 18mm; object-fit: cover; border-radius: 2mm; }
+  .receipt-initials { width: 18mm; height: 18mm; }
+  .receipt-initials { font-size: 13pt; }
+  .receipt-student-name { font-size: 11.5pt; }
+  .receipt-student-meta span { font-size: 9.5pt; }
+  .receipt-pay { margin-top: 1.3mm; padding: 1mm 1.8mm; }
+  .receipt-pay strong, .receipt-split { font-size: 10pt; }
+  .receipt-table-wrap { margin-top: 1.3mm; }
+  .receipt-items th { font-size: 8pt; padding: 0.8mm 1.8mm; }
+  .receipt-items td { font-size: 10pt; padding: 0.8mm 1.8mm; }
+  .receipt-net td { font-size: 12.5pt; font-weight: 800; }
+  .receipt-words { font-size: 10pt; margin-top: 1mm; }
+  .receipt-words span { font-size: 8pt; }
+  .receipt-instructions { margin: 1mm 0 0.8mm; padding: 1.1mm 1.8mm; }
+  .receipt-instructions-title { font-size: 8.5pt; margin-bottom: 1mm; }
+  .receipt-instructions li { font-size: 9.5pt; line-height: 1.3; margin: 0 0 0.6mm; }
+  .receipt-slip-foot { margin-top: auto; padding-top: 1mm; }
+  .receipt-terms { font-size: 8.5pt; }
+  .receipt-powered { font-size: 9pt; }
+  .receipt-print-sheet, .receipt-print-sheet * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    box-sizing: border-box;
+  }
+  body:has(.receipt-print-sheet) .no-print { display: none !important; }
+}
+
+/* Narrow / mobile print preview: keep the info grid and badge inside the slip. */
+@media print and (max-width: 600px) {
+  .receipt-info-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .receipt-info-grid > div {
+    border-bottom: 1px solid #e5e5e5;
+    border-right: 1px solid #e5e5e5;
+  }
+  .receipt-info-grid > div:nth-child(2n) { border-right: none; }
+  .receipt-info-grid > div:nth-last-child(-n+2) { border-bottom: none; }
+  .receipt-half { padding: 5mm 5mm 4mm; }
+  .receipt-slip-aside { max-width: 42%; }
+  .receipt-print-sheet .receipt-cut { margin: 0 5mm; }
 }
 
 /* ======================================================== */
@@ -457,6 +1049,27 @@ body {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
+
+  /* Receipt tables stay real tables so labels and amounts line up at phone width. */
+  .printable-receipt table,
+  .receipt-slip table { display: table; overflow: visible; width: 100%; }
+  .printable-receipt thead,
+  .receipt-slip thead { display: table-header-group; }
+  .printable-receipt tbody,
+  .receipt-slip tbody { display: table-row-group; }
+  .printable-receipt tr,
+  .receipt-slip tr { display: table-row; }
+  .printable-receipt th,
+  .printable-receipt td,
+  .receipt-slip th,
+  .receipt-slip td { display: table-cell; }
+  .receipt-modal .modal-header { flex-wrap: wrap; gap: 8px; padding: 12px 0 10px; }
+  .receipt-modal-body { padding: 4px 0 8px; }
+  .receipt-modal-footer { padding: 10px 0 0; }
+  .receipt-lib-name { font-size: 17px; }
+  .receipt-slip { padding: 10px; }
+  .receipt-seg button { font-size: 12px; padding: 8px 4px; }
+  .receipt-pay-ref { text-align: left; }
   
   /* Prevent horizontal overflow on body */
   body {
@@ -465,9 +1078,19 @@ body {
   }
 
   /* Make inputs full width in modals */
-  .modal-content input, .modal-content select, .modal-content textarea {
+  .modal-content input:not([type="radio"]):not([type="checkbox"]), .modal-content select, .modal-content textarea {
     width: 100% !important;
     max-width: 100% !important;
+  }
+}
+
+/* At the 768px desktop boundary, keep data grids as real tables. The
+   mobile block above is meant for phones, not the desktop table layout. */
+@media (min-width: 768px) {
+  table.data-grid {
+    display: table;
+    width: auto;
+    min-width: 100%;
   }
 }
 
@@ -496,3 +1119,28 @@ body {
 .lib-workspace .app-container {
   height: 100%;
 }
+
+/* Dark mode: token swap only. Profile toggle writes data-theme on <html>. */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-main: #0c0a09;
+  --bg-surface: #1c1917;
+  --bg-surface-hover: #292524;
+  --bg-glass: rgba(28, 25, 23, 0.86);
+  --border-light: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-focus: rgba(255, 255, 255, 0.3);
+  --text-primary: #fafaf9;
+  --text-secondary: #d6d3d1;
+  --text-tertiary: #a8a29e;
+  --brand-primary: #fafaf9;
+  --brand-primary-hover: #e7e5e4;
+  --brand-accent: #fbbf24;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 16px rgba(0, 0, 0, 0.35);
+}
+html[data-theme="dark"] .seat-3d.seat-available { background: #f8fafc; border-color: #cbd5e1; color: #0f172a; }
+html[data-theme="dark"] .seat-3d.seat-available .seat-number { color: #0f172a; }
+html[data-theme="dark"] body { background: var(--bg-main); color: var(--text-primary); }
+html[data-theme="dark"] .btn-primary { color: #1c1917; }
+html[data-theme="dark"] #session-bar { background: #1c1917 !important; color: #fafaf9 !important; }

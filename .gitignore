@@ -40,3 +40,14 @@ dist-ssr/
 .env.*.local
 *.pem
 *.key
+
+# Vercel CLI
+.vercel
+
+# Encrypted database backups (never commit)
+backups/
+server/backups/
+*.bak
+
+# Password file written by server/scripts/create-razorpay-demo-owner.mjs
+server/.razorpay-demo-owner.credentials

@@ -180,17 +180,17 @@ export default function Showcase() {
           dark
           eyebrow="Product tour"
           title="One dashboard for the whole front desk"
-          sub="The same screens your staff use every day: collections, occupancy, fees due, the seat map and every payment with a receipt one click away."
+          sub="A short tour of the screens your team opens through the day."
         />
         <div className="mt-10 flex justify-center">
-          <div role="tablist" aria-label="Product views" className="glass inline-flex rounded-full p-1">
+          <div role="tablist" aria-label="Product views" className="glass inline-flex max-w-full flex-wrap justify-center rounded-full p-1">
             {tabs.map(([label], i) => (
               <button
                 key={label}
                 role="tab"
                 aria-selected={tab === i}
                 onClick={() => setTab(i)}
-                className={`cursor-pointer whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-semibold transition-colors duration-200 sm:px-5 ${
+                className={`cursor-pointer whitespace-nowrap rounded-full px-3 py-2 text-[13px] font-semibold transition-colors duration-200 sm:px-5 sm:text-sm ${
                   tab === i ? 'bg-gold-400 text-ink-950' : 'text-stone-300 hover:text-white'
                 }`}
               >
@@ -209,16 +209,16 @@ export default function Showcase() {
               <span className="h-3 w-3 rounded-full bg-rose-400/80" />
               <span className="h-3 w-3 rounded-full bg-amber-400/80" />
               <span className="h-3 w-3 rounded-full bg-emerald-400/80" />
-              <span className="mx-auto hidden rounded-md bg-white/5 px-24 py-1 text-xs text-stone-500 sm:block">your-library · Library OS</span>
+              <span className="mx-auto hidden rounded-md bg-white/5 px-24 py-1 text-xs text-stone-500 sm:block">your-library · My Library OS</span>
               <SampleBadge className="ml-auto text-gold-300 sm:ml-0" />
             </div>
             <div className="flex bg-stone-100">
               <aside className="hidden w-56 shrink-0 flex-col gap-1 border-r border-stone-200 bg-white p-3 md:flex">
                 <div className="mb-3 flex items-center gap-2 px-2 py-2">
-                  <img src="/favicon.svg" alt="" className="h-7 w-7" />
+                  <img src="/logo-icon.png" alt="" className="h-7 w-7" />
                   <div className="leading-tight">
                     <p className="text-sm font-bold text-ink-950">Your Library</p>
-                    <p className="text-[11px] text-stone-500">Library Management OS</p>
+                    <p className="text-[11px] text-stone-500">My Library OS</p>
                   </div>
                 </div>
                 {nav.map(([l, I], i) => {
@@ -230,7 +230,7 @@ export default function Showcase() {
                   );
                 })}
               </aside>
-              <div className="min-h-[420px] flex-1 p-3 text-ink-950 sm:min-h-[460px] sm:p-5">
+              <div className="min-h-[280px] flex-1 p-3 text-ink-950 sm:min-h-[420px] sm:p-5 md:min-h-[460px]">
                 <div className="mb-4 flex items-center justify-between">
                   <p className="font-display text-lg font-bold">{tabs[tab][0]}</p>
                   <span className="rounded-lg bg-white px-2.5 py-1 text-xs text-stone-500 ring-1 ring-stone-200">Main branch</span>

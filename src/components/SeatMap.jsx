@@ -1,16 +1,74 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import { useLibrary } from '../context/LibraryContext';
-import { MoreVertical, Plus, Trash2, Settings, Ban, CheckCircle2, X, AlertCircle, Building2 } from 'lucide-react';
+import { MoreVertical, Plus, Trash2, Settings, CheckCircle2, X, AlertCircle, Building2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { NumericInput } from './NumericInput';
 import { resolveConfigurationScope, matchesScope } from '../utils/scopeResolver';
 import { getCanonicalShifts, normalizeShiftName, resolveCanonicalShift, shiftsOverlap } from '../utils/shiftUtils';
+import { SEAT_COLORS, SEAT_MAP_VIEWS, deskPaymentState, occupancyStatusClass, paymentStatusClass, filterPhotoTiles } from '../utils/seatMapViews';
+import { useStudentPhoto } from '../utils/useStudentPhoto';
 import toast from 'react-hot-toast';
+import { deskGrowthMessage } from '../utils/planLimitCopy';
+import { holdsDesk } from '../utils/subscriptionLifecycle.js';
+import { todayIST } from '../utils/dateUtils';
+
+// Seat numbers must be compared exactly. Trimming protects against legacy
+// whitespace while avoiding includes()/startsWith() partial matches (BUG-13).
+const normalizeSeatKey = (value) => String(value ?? '').trim();
+const getSeatKey = (seat) => normalizeSeatKey(seat?.name ?? seat?.seatNumber);
+const isPhysicalSeatNo = (seatNo) => {
+  const key = normalizeSeatKey(seatNo);
+  return Boolean(key) && key !== 'Non-Fixed Seat' && key !== 'None';
+};
+const getStudentShift = (student, shifts) =>
+  (shifts || []).find(sh => sh.id === student?.shiftId) || { id: student?.shiftId, name: student?.shift };
+
+// Build a scope-accurate occupancy map for a section. Keys are exact seat
+// numbers; values are the active/expiring students assigned to that seat.
+// NOTE: Backend atomic seat assignment/unique constraints are follow-up work;
+// this only fixes what the seat map displays.
+const buildSeatOccupancy = (students, shifts, { libraryId, branchId, sectionId, shiftId, settings }) => {
+  const map = new Map();
+  const requestedShift = shiftId ? ((shifts || []).find(sh => sh.id === shiftId) || { id: shiftId }) : null;
+
+  (students || []).forEach(student => {
+    if (!student || !holdsDesk(student, settings, todayIST())) return;
+    if (!isPhysicalSeatNo(student.seatNo)) return;
+    if (libraryId && student.libraryId && student.libraryId !== libraryId) return;
+    if (branchId && branchId !== 'all' && student.branchId && student.branchId !== 'all' && student.branchId !== branchId) return;
+    if (sectionId && sectionId !== 'all' && student.sectionId && student.sectionId !== sectionId) return;
+
+    if (requestedShift) {
+      const studentShift = getStudentShift(student, shifts);
+      if (!shiftsOverlap(studentShift, requestedShift)) return;
+    }
+
+    const key = normalizeSeatKey(student.seatNo);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(student);
+  });
+
+  return map;
+};
+
+// Duplicate = more than one active student whose shifts overlap on the same desk.
+const hasOverlappingOccupants = (occupants, shifts) => {
+  if (!occupants || occupants.length < 2) return false;
+  for (let i = 0; i < occupants.length; i++) {
+    for (let j = i + 1; j < occupants.length; j++) {
+      if (shiftsOverlap(getStudentShift(occupants[i], shifts), getStudentShift(occupants[j], shifts))) {
+        return true;
+      }
+    }
+  }
+  return false;
+};
 
 export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }) => {
   const { 
     settings, students, branches, sections, seats, activeBranchId, 
-    seatTypes, setSeats, shifts, getBlockOccupancyMap, getCurrentActiveAdmissions, canDeleteSeat,
+    seatTypes, setSeats, shifts, getCurrentActiveAdmissions, canDeleteSeat,
     getUnsyncedShifts, plans
   } = useLibrary();
 
@@ -51,6 +109,9 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
   }, [shifts, unsyncedShiftsList, activeBranchId]);
 
   const [selectedShiftId, setSelectedShiftId] = useState('');
+  const [mapView, setMapView] = useState('occupancy');
+  const [photoQuery, setPhotoQuery] = useState('');
+  const [photoPreview, setPhotoPreview] = useState(null);
 
   // Auto-sync selectedShiftId when applicableShifts changes, preserving canonical shift name if available
   useEffect(() => {
@@ -75,6 +136,17 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
   const [selectionModeSectionId, setSelectionModeSectionId] = useState(null);
   const [selectedSeatIds, setSelectedSeatIds] = useState([]);
   const [showBulkMenuForSection, setShowBulkMenuForSection] = useState(null);
+
+  // Portal-based 3-dot menu (BUG-03): keep it inside the viewport.
+  const [menuTriggerEl, setMenuTriggerEl] = useState(null);
+  const [bulkMenuPosition, setBulkMenuPosition] = useState(null);
+  const bulkMenuRef = useRef(null);
+
+  const closeBulkMenu = useCallback(() => {
+    setShowBulkMenuForSection(null);
+    setMenuTriggerEl(null);
+    setBulkMenuPosition(null);
+  }, []);
 
   // Add Seats Modal State (Post-Setup)
   const [isAddSeatsModalOpen, setIsAddSeatsModalOpen] = useState(false);
@@ -148,7 +220,7 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
   };
 
   const handleMarkStatus = (statusObj) => {
-    setShowBulkMenuForSection(null);
+    closeBulkMenu();
     if (selectedSeatIds.length === 0) return toast.error('No seats selected.');
     setSeats(prev => prev.map(s => selectedSeatIds.includes(s.id) ? { ...s, ...statusObj } : s));
     toast.success('Updated selected seats.');
@@ -157,7 +229,7 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
   };
 
   const handleBulkRemove = () => {
-    setShowBulkMenuForSection(null);
+    closeBulkMenu();
     if (selectedSeatIds.length === 0) return toast.error('No seats selected.');
     
     let removed = 0;
@@ -252,7 +324,7 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
   };
 
   // Add Generated Seats to Map
-  const handleConfirmAddSeats = () => {
+  const handleConfirmAddSeats = async () => {
     const effectiveBranch = (targetAddBranchId && targetAddBranchId !== 'all')
       ? targetAddBranchId
       : ((activeBranchId !== 'all' ? activeBranchId : null) || (branches.length > 0 ? branches[0].id : undefined));
@@ -295,6 +367,8 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
     });
 
     if (added > 0) {
+      const blocked = await deskGrowthMessage(seats.length, added);
+      if (blocked) return toast.error(blocked);
       setSeats(prev => [...prev, ...newItems]);
       toast.success(`Added ${added} new desks! ${skippedDuplicates > 0 ? `(${skippedDuplicates} duplicates skipped)` : ''}`);
       setIsAddSeatsModalOpen(false);
@@ -307,7 +381,7 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setSelectedDesk(null);
-        setShowBulkMenuForSection(null);
+        closeBulkMenu();
         setIsAddSeatsModalOpen(false);
         if (selectionModeSectionId) {
           setSelectionModeSectionId(null);
@@ -317,18 +391,72 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedDesk, selectionModeSectionId]);
+  }, [selectedDesk, selectionModeSectionId, closeBulkMenu]);
 
-  // Click outside to close 3-dot dropdown menu
+  // Position the portal menu from the trigger rect, flipping when it would
+  // overflow the viewport (8px safety margin).
+  useLayoutEffect(() => {
+    if (!menuTriggerEl || !bulkMenuRef.current) {
+      setBulkMenuPosition(null);
+      return;
+    }
+
+    const margin = 8;
+    const triggerRect = menuTriggerEl.getBoundingClientRect();
+    const menuRect = bulkMenuRef.current.getBoundingClientRect();
+    const menuWidth = menuRect.width || 220;
+    const menuHeight = menuRect.height || 240;
+
+    let left = triggerRect.right - menuWidth;
+    if (left < margin) left = triggerRect.left;
+    left = Math.max(margin, Math.min(left, window.innerWidth - menuWidth - margin));
+
+    let top = triggerRect.bottom + 6;
+    if (top + menuHeight > window.innerHeight - margin) {
+      top = triggerRect.top - menuHeight - 6;
+    }
+    top = Math.max(margin, Math.min(top, window.innerHeight - menuHeight - margin));
+
+    setBulkMenuPosition({ top, left });
+  }, [showBulkMenuForSection, menuTriggerEl]);
+
+  // Portal menu dismissal: outside pointer, Escape handled above, scroll/resize.
   useEffect(() => {
-    const handleDocumentClick = (e) => {
-      if (showBulkMenuForSection && !e.target.closest('[data-dropdown-container="true"]')) {
-        setShowBulkMenuForSection(null);
-      }
+    if (!menuTriggerEl) return;
+
+    const handleOutside = (e) => {
+      if (bulkMenuRef.current?.contains(e.target)) return;
+      if (menuTriggerEl?.contains(e.target)) return;
+      closeBulkMenu();
     };
-    document.addEventListener('click', handleDocumentClick);
-    return () => document.removeEventListener('click', handleDocumentClick);
-  }, [showBulkMenuForSection]);
+    const handleResize = () => closeBulkMenu();
+    const handleScroll = (e) => {
+      // Scrolling the menu itself must not dismiss it.
+      if (bulkMenuRef.current?.contains(e.target)) return;
+      closeBulkMenu();
+    };
+
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('touchstart', handleOutside, { passive: true });
+    document.addEventListener('click', handleOutside);
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('scroll', handleScroll, true);
+
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('touchstart', handleOutside);
+      document.removeEventListener('click', handleOutside);
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [showBulkMenuForSection, menuTriggerEl, closeBulkMenu]);
+
+  const selectedDeskOccupants = selectedDesk
+    ? (selectedDesk.occupants?.length
+        ? selectedDesk.occupants
+        : (selectedDesk.occupant ? [selectedDesk.occupant] : []))
+    : [];
+  const selectedDeskHasDuplicate = Boolean(selectedDesk?.isDuplicate);
 
   return (
     <motion.div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
@@ -400,6 +528,19 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
               })}
             </div>
           )}
+
+          <div className="seat-view-switcher" role="group" aria-label="Seat map view">
+            {SEAT_MAP_VIEWS.map((view) => (
+              <button
+                key={view.id}
+                type="button"
+                aria-pressed={mapView === view.id}
+                onClick={() => setMapView(view.id)}
+              >
+                {view.label}
+              </button>
+            ))}
+          </div>
 
           {/* Shift Filter Tabs (Strictly valid, active, scope-matched shifts) */}
           <div style={{ display: 'flex', gap: '4px', background: '#fff', padding: '4px', borderRadius: '8px', border: '1px solid var(--border-light)', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', flexWrap: 'wrap' }}>
@@ -485,9 +626,22 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
               </div>
             )}
             {renderSections.map(section => {
-              // Occupancy mapping using canonical schedules
-              const blockOccupancy = getBlockOccupancyMap(branch.id, section.id, selectedShiftId);
-              const seatOccupancyMap = blockOccupancy.fixed;
+              // Determine effective shift for this section
+              const sectionShifts = applicableShifts.filter(sh => matchesScope(sh, branch.id, section.id));
+              const effectiveShiftId = sectionShifts.some(s => s.id === selectedShiftId) 
+                ? selectedShiftId 
+                : (sectionShifts[0]?.id || selectedShiftId);
+
+              // Exact seat-number occupancy, scoped to this branch + section + shift.
+              const occupancyMap = buildSeatOccupancy(students, shifts, {
+                libraryId: libId,
+                branchId: branch.id,
+                sectionId: section.id,
+                shiftId: effectiveShiftId,
+                settings
+              });
+              const isSeatKeyOccupied = (seat) => (occupancyMap.get(getSeatKey(seat)) || []).length > 0;
+
 
               const rawSectionSeats = seats.filter(s => {
                 const matchesBranch = !s.branchId || s.branchId === 'all' || s.branchId === branch.id;
@@ -514,8 +668,8 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
                   dedupedMap.set(sName, s);
                 } else {
                   const existing = dedupedMap.get(sName);
-                  const isCurOccupied = Boolean(seatOccupancyMap[s.name] || (s.id && seatOccupancyMap[s.id]));
-                  const isExistOccupied = Boolean(seatOccupancyMap[existing.name] || (existing.id && seatOccupancyMap[existing.id]));
+                  const isCurOccupied = isSeatKeyOccupied(s);
+                  const isExistOccupied = isSeatKeyOccupied(existing);
                   if ((isCurOccupied || s.isMaintenance || s.isUnavailable) && !isExistOccupied && !existing.isMaintenance && !existing.isUnavailable) {
                     dedupedMap.set(sName, s);
                   }
@@ -537,19 +691,21 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
               });
               const nonFixedTypes = sectionSeatTypes.filter(st => st.allocationMode === 'Non-Fixed');
 
+
               // Accurate Count Calculations
               const totalSeats = sectionSeats.length;
               let occupiedCount = 0;
               let maintenanceCount = 0;
-              let unavailableCount = 0;
+              let duplicateSeatCount = 0;
 
               sectionSeats.forEach(seat => {
-                if (seat.isUnavailable) unavailableCount++;
-                else if (seat.isMaintenance) maintenanceCount++;
-                else if (seatOccupancyMap[seat.name] || (seat.id && seatOccupancyMap[seat.id])) occupiedCount++;
+                const occupants = occupancyMap.get(getSeatKey(seat)) || [];
+                if (seat.isMaintenance) maintenanceCount++;
+                else if (occupants.length > 0) occupiedCount++;
+                if (hasOverlappingOccupants(occupants, shifts)) duplicateSeatCount++;
               });
 
-              const vacantEligibleCount = Math.max(0, totalSeats - occupiedCount - maintenanceCount - unavailableCount);
+              const vacantEligibleCount = Math.max(0, totalSeats - occupiedCount - maintenanceCount);
 
               // Non-fixed stats
               const nonFixedStats = nonFixedTypes.map(st => {
@@ -568,34 +724,22 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
                         {activeBranchId === 'all' ? `${branch.name} — ${section.name}` : (branches.length > 1 ? `${branch.name} — ${section.name}` : section.name)}
                       </h3>
 
-                      {/* Precise Counts Breakdown */}
-                      <div style={{ display: 'flex', gap: '16px', marginTop: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#22c55e' }} />
-                          <span style={{ fontSize: '12px', fontWeight: 600, color: '#15803d' }}>
-                            Vacant & Eligible ({vacantEligibleCount})
-                          </span>
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#3b82f6' }} />
-                          <span style={{ fontSize: '12px', fontWeight: 500, color: '#1d4ed8' }}>Occupied Male</span>
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#ec4899' }} />
-                          <span style={{ fontSize: '12px', fontWeight: 500, color: '#be185d' }}>Occupied Female</span>
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#eab308' }} />
-                          <span style={{ fontSize: '12px', fontWeight: 500, color: '#a16207' }}>Maintenance ({maintenanceCount})</span>
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#94a3b8' }} />
-                          <span style={{ fontSize: '12px', fontWeight: 500, color: '#475569' }}>Unavailable ({unavailableCount})</span>
-                        </div>
+                      <div className="seat-legend" aria-label={mapView === 'payment' ? 'Payment legend' : 'Occupancy legend'}>
+                        {mapView === 'payment' ? (
+                          <>
+                            <LegendSwatch color={SEAT_COLORS.payment.paid} label="Paid" />
+                            <LegendSwatch color={SEAT_COLORS.payment.unpaid} label="Unpaid" />
+                            <LegendSwatch color={SEAT_COLORS.payment.mixed} label="Mixed" />
+                            <LegendSwatch color={SEAT_COLORS.payment.unassigned} label="Unassigned" />
+                          </>
+                        ) : (
+                          <>
+                            <LegendSwatch color={SEAT_COLORS.occupancy.vacant} border="1px solid #cbd5e1" label={`Vacant (${vacantEligibleCount})`} />
+                            <LegendSwatch color={SEAT_COLORS.occupancy.male} label="Male" />
+                            <LegendSwatch color={SEAT_COLORS.occupancy.female} label="Female" />
+                            <LegendSwatch color={SEAT_COLORS.occupancy.maintenance} label={`Maintenance (${maintenanceCount})`} />
+                          </>
+                        )}
 
                         {nonFixedStats.map(ns => (
                           <div key={ns.name} style={{ background: '#f0f9ff', border: '1px solid #bae6fd', padding: '2px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 600, color: '#0369a1' }}>
@@ -606,33 +750,56 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
                     </div>
 
                     {/* Bold, high-contrast More Actions 3-dot button */}
-                    <div style={{ position: 'relative' }} data-dropdown-container="true">
+                    <div style={{ position: 'relative' }}>
                       <button 
                         type="button"
                         className="btn btn-ghost" 
                         style={{ 
                           width: '36px', height: '36px', padding: 0, borderRadius: '8px', 
-                          background: showBulkMenuForSection === section.id ? '#e2e8f0' : '#f1f5f9', 
+                          background: menuTriggerEl && showBulkMenuForSection === section.id ? '#e2e8f0' : '#f1f5f9', 
                           border: '1px solid #cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'center',
                           cursor: 'pointer', transition: 'all 0.15s ease'
                         }} 
                         onClick={(e) => {
                           e.stopPropagation();
-                          setShowBulkMenuForSection(showBulkMenuForSection === section.id ? null : section.id);
+                          if (showBulkMenuForSection === section.id && menuTriggerEl === e.currentTarget) {
+                            closeBulkMenu();
+                          } else {
+                            setMenuTriggerEl(e.currentTarget);
+                            setShowBulkMenuForSection(section.id);
+                          }
                         }}
                         title="Section Seat Actions"
                         aria-label="Section Seat Actions"
+                        aria-haspopup="menu"
+                        aria-expanded={showBulkMenuForSection === section.id}
                       >
                         <MoreVertical size={20} strokeWidth={2.8} color="#0f172a" />
                       </button>
 
-                      {showBulkMenuForSection === section.id && (
-                        <div className="dropdown-menu">
-                          <button type="button" className="dropdown-item" onClick={() => { setSelectionModeSectionId(section.id); setShowBulkMenuForSection(null); }}>
+                      {showBulkMenuForSection === section.id && ReactDOM.createPortal(
+                        <div
+                          ref={bulkMenuRef}
+                          className="dropdown-menu"
+                          role="menu"
+                          style={{
+                            position: 'fixed',
+                            top: bulkMenuPosition ? bulkMenuPosition.top : 0,
+                            left: bulkMenuPosition ? bulkMenuPosition.left : 0,
+                            right: 'auto',
+                            marginTop: 0,
+                            zIndex: 2000,
+                            maxHeight: 'calc(100vh - 16px)',
+                            maxWidth: 'calc(100vw - 16px)',
+                            overflowY: 'auto',
+                            visibility: bulkMenuPosition ? 'visible' : 'hidden'
+                          }}
+                        >
+                          <button type="button" role="menuitem" className="dropdown-item" onClick={() => { setSelectionModeSectionId(section.id); closeBulkMenu(); }}>
                             <CheckCircle2 size={15} color="#2563eb" />
                             <span>Select Desks</span>
                           </button>
-                          <button type="button" className="dropdown-item" onClick={() => { setSelectionModeSectionId(section.id); handleSelectAll(sectionSeats); setShowBulkMenuForSection(null); }}>
+                          <button type="button" role="menuitem" className="dropdown-item" onClick={() => { setSelectionModeSectionId(section.id); handleSelectAll(sectionSeats); closeBulkMenu(); }}>
                             <CheckCircle2 size={15} color="#16a34a" />
                             <span>Select All Desks ({sectionSeats.length})</span>
                           </button>
@@ -640,27 +807,33 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
                           <div className="dropdown-header">
                             Bulk Status Actions
                           </div>
-                          <button type="button" className="dropdown-item" onClick={() => handleMarkStatus({ isMaintenance: true, isUnavailable: false })}>
+                          <button type="button" role="menuitem" className="dropdown-item" onClick={() => handleMarkStatus({ isMaintenance: true, isUnavailable: false })}>
                             <Settings size={15} color="#d97706" />
                             <span>Mark Maintenance</span>
                           </button>
-                          <button type="button" className="dropdown-item" onClick={() => handleMarkStatus({ isMaintenance: false, isUnavailable: false })}>
+                          <button type="button" role="menuitem" className="dropdown-item" onClick={() => handleMarkStatus({ isMaintenance: false, isUnavailable: false })}>
                             <CheckCircle2 size={15} color="#16a34a" />
                             <span>Mark Available</span>
                           </button>
-                          <button type="button" className="dropdown-item" onClick={() => handleMarkStatus({ isUnavailable: true, isMaintenance: false })}>
-                            <Ban size={15} color="#64748b" />
-                            <span>Mark Unavailable</span>
-                          </button>
                           <div className="dropdown-divider" />
-                          <button type="button" className="dropdown-item danger" onClick={handleBulkRemove}>
+                          <button type="button" role="menuitem" className="dropdown-item danger" onClick={handleBulkRemove}>
                             <Trash2 size={15} />
                             <span>Remove Unoccupied Desks</span>
                           </button>
-                        </div>
+                        </div>,
+                        document.body
                       )}
                     </div>
                   </div>
+
+                  {duplicateSeatCount > 0 && (
+                    <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '8px 12px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600 }}>
+                      <AlertCircle size={16} />
+                      <span>
+                        Duplicate occupancy: {duplicateSeatCount} desk{duplicateSeatCount === 1 ? '' : 's'} have more than one active student in this shift. Click the desk to review.
+                      </span>
+                    </div>
+                  )}
 
                   {/* Selection Mode Notice Bar */}
                   {selectionModeSectionId === section.id && (
@@ -674,28 +847,44 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
                     </div>
                   )}
 
+                  {mapView === 'photo' && (
+                    <input
+                      className="form-input"
+                      type="search"
+                      placeholder="Search name or desk"
+                      aria-label="Search photo tiles"
+                      value={photoQuery}
+                      onChange={(e) => setPhotoQuery(e.target.value)}
+                    />
+                  )}
+
                   {/* 3D Seat Grid Layout */}
                   <div className="seat-map-container" style={{ minHeight: '120px' }}>
+                    {mapView === 'photo' ? (
+                      <PhotoGrid
+                        seats={sectionSeats}
+                        occupancyMap={occupancyMap}
+                        query={photoQuery}
+                        onOpen={(payload) => setPhotoPreview(payload)}
+                      />
+                    ) : (
                     <div className="seat-grid-3d">
                       {sectionSeats.map((seat, idx) => {
-                        const occupant = seatOccupancyMap[seat.name] || (seat.id && seatOccupancyMap[seat.id]);
-                        const isOccupied = Boolean(occupant);
+                        const occupants = occupancyMap.get(getSeatKey(seat)) || [];
+                        const occupant = occupants[0] || null;
+                        const isOccupied = occupants.length > 0;
+                        const isDuplicate = hasOverlappingOccupants(occupants, shifts);
                         const isSelected = selectedSeatIds.includes(seat.id);
 
-                        // Color rules:
-                        // Available: Green
-                        // Occupied Male: Blue
-                        // Occupied Female: Pink
-                        // Maintenance: Yellow (overrides gender)
-                        // Unavailable: Gray (overrides gender)
-                        let statusClass = 'seat-available';
-                        if (seat.isUnavailable) {
-                          statusClass = 'seat-unavailable';
-                        } else if (seat.isMaintenance) {
-                          statusClass = 'seat-maintenance';
-                        } else if (isOccupied) {
-                          statusClass = occupant.gender === 'Female' ? 'seat-occupied-female' : 'seat-occupied-male';
-                        }
+                        const paymentState = deskPaymentState(occupants);
+                        let statusClass = mapView === 'payment'
+                          ? paymentStatusClass(paymentState)
+                          : occupancyStatusClass({
+                            isUnavailable: seat.isUnavailable,
+                            isMaintenance: seat.isMaintenance,
+                            isOccupied,
+                            gender: occupant?.gender,
+                          });
 
                         // Selected state: bold highlighted border (no solid blue fill)
                         if (isSelected) {
@@ -715,7 +904,7 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
                               if (selectionModeSectionId === section.id) {
                                 handleToggleSeatSelection(seat.id);
                               } else {
-                                setSelectedDesk({ seat, occupant });
+                                setSelectedDesk({ seat, occupant, occupants, isDuplicate });
                               }
                             }}
                           >
@@ -726,6 +915,15 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
                             <div className="seat-right"></div>
                             <div className="seat-shadow"></div>
 
+                            {isDuplicate && (
+                              <div
+                                title="Multiple active students are assigned to this desk."
+                                style={{ position: 'absolute', top: '-6px', left: '-6px', width: '18px', height: '18px', background: '#dc2626', color: '#fff', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}
+                              >
+                                <AlertCircle size={12} strokeWidth={3} />
+                              </div>
+                            )}
+
                             {isSelected && (
                               <div style={{ position: 'absolute', top: '-6px', right: '-6px', background: '#16a34a', color: '#fff', borderRadius: '50%', padding: '2px', zIndex: 10 }}>
                                 <CheckCircle2 size={12} strokeWidth={3} />
@@ -735,6 +933,7 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
                         );
                       })}
                     </div>
+                    )}
                   </div>
                 </div>
               );
@@ -742,6 +941,39 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
           </div>
         );
       })}
+
+      <AnimatePresence>
+        {photoPreview && (
+          <div className="modal-overlay" onClick={() => setPhotoPreview(null)}>
+            <motion.div className="modal-content" onClick={e => e.stopPropagation()} initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} style={{ maxWidth: '440px' }}>
+              <div className="modal-header">
+                <h3 style={{ fontSize: '18px', fontWeight: 600 }}>Photo preview</h3>
+                <button className="btn-ghost" onClick={() => setPhotoPreview(null)}><X size={20} /></button>
+              </div>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <PhotoFace student={photoPreview.occupant} large />
+                <div>
+                  <div style={{ fontSize: '16px', fontWeight: 700 }}>{photoPreview.occupant?.name || 'Vacant'}</div>
+                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Desk {photoPreview.seat.name}</div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {photoPreview.occupant && onSelectStudent && (
+                    <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => {
+                      onSelectStudent(photoPreview.occupant);
+                      setPhotoPreview(null);
+                    }}>Student Details</button>
+                  )}
+                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
+                    const payload = photoPreview;
+                    setPhotoPreview(null);
+                    setSelectedDesk({ seat: payload.seat, occupant: payload.occupant, occupants: payload.occupants, isDuplicate: payload.isDuplicate });
+                  }}>Seat Details</button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Desk Details Inspection Modal */}
       <AnimatePresence>
@@ -753,45 +985,89 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
                 <button className="btn-ghost" onClick={() => setSelectedDesk(null)}><X size={20} /></button>
               </div>
               <div className="modal-body">
-                {selectedDesk.occupant ? (
+                {selectedDesk.seat.isMaintenance ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                      <Settings size={42} color="#d97706" style={{ margin: '0 auto 12px' }} />
+                      <h4 style={{ fontSize: '16px', fontWeight: 600 }}>
+                        Desk Under Maintenance
+                      </h4>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px' }}>
+                        This desk is not available for student allocation.
+                      </p>
+                    </div>
+                    {selectedDeskOccupants.length > 0 && (
+                      <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '10px 12px', borderRadius: '8px', display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '13px', fontWeight: 600 }}>
+                        <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '1px' }} />
+                        <span>
+                          Active student still assigned: {selectedDeskOccupants.map(o => o.name || o.id).join(', ')}. Relocate them before using this desk.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                ) : selectedDeskOccupants.length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <div style={{ width: '44px', height: '44px', borderRadius: '50%', background: 'var(--brand-primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: 700 }}>
-                        {selectedDesk.occupant.name.charAt(0)}
+                    {selectedDeskHasDuplicate && (
+                      <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '10px 12px', borderRadius: '8px', display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '13px', fontWeight: 600 }}>
+                        <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '1px' }} />
+                        <span>Duplicate occupancy: more than one active student is assigned to this desk in overlapping shifts.</span>
                       </div>
-                      <div>
-                        <h4 style={{ fontSize: '16px', fontWeight: 700 }}>{selectedDesk.occupant.name}</h4>
-                        <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>ID: {selectedDesk.occupant.id} • {selectedDesk.occupant.phone}</div>
-                      </div>
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
-                      <div>
-                        <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>SHIFT</span>
-                        <div style={{ fontSize: '14px', fontWeight: 600, marginTop: '2px' }}>{selectedDesk.occupant.shift}</div>
-                      </div>
-                      <div>
-                        <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>EXPIRY DATE</span>
-                        <div style={{ fontSize: '14px', fontWeight: 600, color: '#16a34a', marginTop: '2px' }}>{selectedDesk.occupant.expiryDate}</div>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                      {onSelectStudent && (
-                        <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => {
-                          onSelectStudent(selectedDesk.occupant);
-                          setSelectedDesk(null);
-                        }}>
-                          View Student
-                        </button>
-                      )}
-                      {onRelocateStudent && (
-                        <button className="btn btn-ghost" style={{ border: '1px solid var(--border-light)' }} onClick={() => {
-                          onRelocateStudent(selectedDesk.occupant);
-                          setSelectedDesk(null);
-                        }}>
-                          Relocate Desk
-                        </button>
-                      )}
-                    </div>
+                    )}
+                    {selectedDeskOccupants.map((occupant, index) => {
+                      const shiftLabel = occupant.shift || getStudentShift(occupant, shifts).name || '—';
+                      return (
+                        <div
+                          key={occupant.id || index}
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '12px',
+                            paddingBottom: index < selectedDeskOccupants.length - 1 ? '16px' : 0,
+                            borderBottom: index < selectedDeskOccupants.length - 1 ? '1px solid var(--border-light)' : 'none'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <div style={{ width: '44px', height: '44px', borderRadius: '50%', background: 'var(--brand-primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: 700 }}>
+                              {String(occupant.name || '?').charAt(0)}
+                            </div>
+                            <div>
+                              <h4 style={{ fontSize: '16px', fontWeight: 700 }}>{occupant.name || 'Unnamed student'}</h4>
+                              <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                                ID: {occupant.id || '—'}{occupant.phone ? ` • ${occupant.phone}` : ''}
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
+                            <div>
+                              <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>SHIFT</span>
+                              <div style={{ fontSize: '14px', fontWeight: 600, marginTop: '2px' }}>{shiftLabel}</div>
+                            </div>
+                            <div>
+                              <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>EXPIRY DATE</span>
+                              <div style={{ fontSize: '14px', fontWeight: 600, color: '#16a34a', marginTop: '2px' }}>{occupant.expiryDate || '—'}</div>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                            {onSelectStudent && (
+                              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => {
+                                onSelectStudent(occupant);
+                                setSelectedDesk(null);
+                              }}>
+                                View Student
+                              </button>
+                            )}
+                            {onRelocateStudent && (
+                              <button className="btn btn-ghost" style={{ border: '1px solid var(--border-light)' }} onClick={() => {
+                                onRelocateStudent(occupant);
+                                setSelectedDesk(null);
+                              }}>
+                                Relocate Desk
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div style={{ textAlign: 'center', padding: '24px 0' }}>
@@ -954,3 +1230,75 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
     </motion.div>
   );
 };
+
+function LegendSwatch({ color, label, border }) {
+  return (
+    <div className="seat-legend-item">
+      <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: color, border: border || '1px solid transparent' }} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function PhotoFace({ student, large }) {
+  const src = useStudentPhoto(student);
+  const [failed, setFailed] = useState(false);
+  if (!student) {
+    return <div className="seat-photo-empty">Vacant</div>;
+  }
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt={`${student.name || 'Student'} photo`}
+        className={large ? 'seat-photo-preview-img' : 'seat-photo-img'}
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return <div className="seat-photo-empty">No photo</div>;
+}
+
+function PhotoGrid({ seats, occupancyMap, query, onOpen }) {
+  const tiles = [];
+  seats.forEach((seat) => {
+    const occupants = occupancyMap.get(getSeatKey(seat)) || [];
+    const isDuplicate = occupants.length > 1;
+    if (occupants.length === 0) {
+      tiles.push({ key: seat.id, seat, occupant: null, occupants, isDuplicate: false, name: 'Vacant', desk: seat.name, id: '' });
+    } else {
+      occupants.forEach((occupant, index) => {
+        tiles.push({
+          key: `${seat.id}-${occupant.id || index}`,
+          seat,
+          occupant,
+          occupants,
+          isDuplicate,
+          name: occupant.name,
+          desk: seat.name,
+          id: occupant.id,
+        });
+      });
+    }
+  });
+  const visible = filterPhotoTiles(tiles, query);
+  if (visible.length === 0) {
+    return <div style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>No desks match that search.</div>;
+  }
+  return (
+    <div className="seat-photo-grid">
+      {visible.map((tile) => (
+        <button
+          key={tile.key}
+          type="button"
+          className="seat-photo-tile"
+          onClick={() => onOpen(tile)}
+        >
+          <PhotoFace student={tile.occupant} />
+          <div className="seat-photo-name">{tile.occupant?.name || 'Vacant'}</div>
+          <div className="seat-photo-desk">Desk {tile.seat.name}</div>
+        </button>
+      ))}
+    </div>
+  );
+}

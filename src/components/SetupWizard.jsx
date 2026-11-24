@@ -1,10 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLibrary } from '../context/LibraryContext';
+import { useAuth } from '../auth/AuthContext';
+import { BrandImageField } from './BrandImageField';
+import { DEFAULT_LIBRARY_LOGO } from '../utils/libraryLogo';
 import { motion } from 'framer-motion';
 import { Building2, Plus, Trash2, CheckCircle, Clock, Copy, Eye, FileText, CheckCircle2, ShieldCheck, X } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { deskGrowthMessage } from '../utils/planLimitCopy';
 import { NumericInput } from './NumericInput';
 import { resolveConfigurationScope, matchesScope } from '../utils/scopeResolver';
+import { compileDurationPricing, defaultTiers, durationUnitForCycle, inferUnitPrice } from '../utils/pricingCalculator';
+import { cycleConfig, effectiveCycleConfig, normalizePlanBillingCycle } from '../utils/billingCycle';
+import { PlanDurationFields } from './PlanDurationFields';
+import { PlanPricingFields } from './PlanPricingFields';
+import { scopedStorage } from '../utils/tenantCache';
+// Issue #2: the wizard draft belongs to the current library only.
+const localStorage = scopedStorage;
 
 const INITIAL_SHIFT_TEMPLATES = [
   { name: "Full Day", startTime: "06:00", endTime: "20:00", daysOfWeek: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
@@ -19,8 +30,18 @@ const INITIAL_PLAN_TEMPLATES = [
   { name: "Weekend Plan" }
 ];
 
-const STANDARD_DURATIONS = [1, 2, 3, 6, 12];
+const DEFAULT_UNIT_PRICE = 1500;
 const ALL_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+const freshPlanPricing = (cycle) => {
+  const unit = durationUnitForCycle(cycle?.mode);
+  const patch = {
+    unitPrice: DEFAULT_UNIT_PRICE,
+    durationPricing: compileDurationPricing(DEFAULT_UNIT_PRICE, defaultTiers(unit), unit),
+  };
+  if (unit === 'month') patch.monthlyPrice = DEFAULT_UNIT_PRICE;
+  return patch;
+};
 
 export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
   const { 
@@ -33,6 +54,7 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
     plans, setPlans,
     students
   } = useLibrary();
+  const library = useAuth()?.library;
 
   // Draft Management
   const getDraft = () => {
@@ -48,7 +70,21 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
   const totalSteps = 8;
 
   // Wizard State
-  const [tempLibraryName, setTempLibraryName] = useState(draft?.tempLibraryName ?? (settings.name || ''));
+  const suggestedLibraryName = settings.name || library?.name || '';
+  const autoLibraryNameRef = useRef(suggestedLibraryName);
+  const [tempLibraryName, setTempLibraryName] = useState(draft?.tempLibraryName ?? suggestedLibraryName);
+
+  useEffect(() => {
+    const next = settings.name || library?.name || '';
+    setTempLibraryName((current) => {
+      if (current === '' || current === autoLibraryNameRef.current) {
+        autoLibraryNameRef.current = next;
+        return next;
+      }
+      return current;
+    });
+  }, [settings.name, library?.name]);
+  const [tempLogo, setTempLogo] = useState(draft?.tempLogo ?? (settings.logo || DEFAULT_LIBRARY_LOGO));
   const [tempBranches, setTempBranches] = useState(draft?.tempBranches ?? (branches.length > 0 ? [...branches] : []));
   const [tempSections, setTempSections] = useState(draft?.tempSections ?? (sections.length > 0 ? [...sections] : []));
   const [tempSeatTypes, setTempSeatTypes] = useState(draft?.tempSeatTypes ?? (seatTypes.length > 0 ? [...seatTypes] : [
@@ -118,6 +154,7 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
     const draftData = {
       step: currentStep,
       tempLibraryName,
+      tempLogo,
       tempBranches,
       tempSections,
       tempSeatTypes,
@@ -170,7 +207,7 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
   }, [generatorMode, simplePrefix, simpleStart, simpleEnd, rowConfigMode, rowNamesInput, seatsPerRow, customRows]);
 
   // Bulk add seats with duplicate detection within the resolved scope
-  const handleAddGeneratedSeats = () => {
+  const handleAddGeneratedSeats = async () => {
     if (previewSeats.length === 0) return toast.error("No valid seats generated to add.");
 
     const currentScopeSeatTypes = tempSeatTypes.filter(st => matchesScope(st, scope.resolvedBranchId, scope.resolvedSectionId));
@@ -206,6 +243,8 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
       }
     });
 
+    const blocked = await deskGrowthMessage(tempSeats.length, addedCount);
+    if (blocked) return toast.error(blocked);
     setTempSeats(newSeatsList);
     if (addedCount > 0) toast.success(`Generated and added ${addedCount} physical seats for ${scope.scopeDisplayName}.`);
     if (duplicates.length > 0) toast(`Skipped ${duplicates.length} duplicate seat names in this section.`);
@@ -306,6 +345,7 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
     setSettings({
       ...settings,
       name: tempLibraryName,
+      logo: tempLogo || settings.logo || DEFAULT_LIBRARY_LOGO,
       libraryId: libId,
       documentTypes: tempDocTypes,
       allowedDocuments: activeDocNames,
@@ -410,6 +450,16 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
         />
       </div>
 
+      <BrandImageField
+        label="Library logo (optional)"
+        value={tempLogo}
+        onChange={setTempLogo}
+        fallbackText={DEFAULT_LIBRARY_LOGO}
+        documentKey="library-logo"
+        testId="setup-library-logo"
+        help="Shown on receipts, the enquiry QR poster and the public enquiry form. You can skip this and add it later in Settings."
+      />
+
       <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid var(--border-light)', marginTop: '16px' }}>
         <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
           💡 Easy Non-Technical Onboarding
@@ -453,7 +503,7 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {tempBranches.map((b) => (
-              <div key={b.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-light)' }}>
+              <div key={b.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-light)', flexWrap: 'wrap' }}>
                 <input 
                   className="form-input" 
                   placeholder="Branch Name (e.g. Branch A / Main Campus)" 
@@ -463,7 +513,7 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
                     const autoCode = (val.trim().slice(0, 3)).toUpperCase();
                     setTempBranches(tempBranches.map(tb => tb.id === b.id ? { ...tb, name: val, code: tb.code || autoCode } : tb));
                   }} 
-                  style={{ flex: 1 }}
+                  style={{ flex: '1 1 160px', minWidth: '120px', width: '100%', color: 'var(--text-primary)', background: 'var(--bg-surface, #fff)' }}
                 />
                 <input 
                   className="form-input" 
@@ -471,19 +521,19 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
                   value={b.code || ''} 
                   maxLength={4}
                   onChange={e => setTempBranches(tempBranches.map(tb => tb.id === b.id ? { ...tb, code: e.target.value.toUpperCase() } : tb))} 
-                  style={{ width: '80px' }}
+                  style={{ flex: '1 1 160px', minWidth: '120px', width: '100%', color: 'var(--text-primary)', background: 'var(--bg-surface, #fff)' }}
                 />
                 <input 
                   className="form-input" 
                   placeholder="Address / Area" 
                   value={b.address || ''} 
                   onChange={e => setTempBranches(tempBranches.map(tb => tb.id === b.id ? { ...tb, address: e.target.value } : tb))} 
-                  style={{ flex: 1.5 }}
+                  style={{ flex: '1 1 180px', minWidth: '120px', width: '100%', color: 'var(--text-primary)', background: 'var(--bg-surface, #fff)' }}
                 />
                 <button 
                   type="button" 
                   className="btn btn-ghost" 
-                  style={{ color: '#ef4444', padding: '6px' }}
+                  style={{ color: '#ef4444', padding: '6px', flexShrink: 0, marginLeft: 'auto' }}
                   onClick={() => {
                     const remaining = tempBranches.filter(tb => tb.id !== b.id);
                     setTempBranches(remaining);
@@ -532,13 +582,13 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {tempSections.map(sec => (
-              <div key={sec.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-light)' }}>
+              <div key={sec.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-light)', flexWrap: 'wrap' }}>
                 <input 
                   className="form-input" 
                   placeholder="Section Name (e.g. Quiet Study Room, Section A1)" 
                   value={sec.name} 
                   onChange={e => setTempSections(tempSections.map(s => s.id === sec.id ? { ...s, name: e.target.value } : s))}
-                  style={{ flex: 1 }}
+                  style={{ flex: '1 1 160px', minWidth: '120px', width: '100%', color: 'var(--text-primary)', background: 'var(--bg-surface, #fff)' }}
                 />
                 
                 {/* Branch ownership selector for section (Shown when 2+ branches exist) */}
@@ -547,7 +597,7 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
                     className="form-select" 
                     value={sec.branchId || tempBranches[0]?.id} 
                     onChange={e => setTempSections(tempSections.map(s => s.id === sec.id ? { ...s, branchId: e.target.value } : s))}
-                    style={{ width: '200px' }}
+                    style={{ flex: '0 1 200px', minWidth: '120px', width: '100%', color: 'var(--text-primary)', background: 'var(--bg-surface, #fff)' }}
                   >
                     {tempBranches.map(b => (
                       <option key={b.id} value={b.id}>
@@ -560,7 +610,7 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
                 <button 
                   type="button" 
                   className="btn btn-ghost" 
-                  style={{ color: '#ef4444', padding: '6px' }}
+                  style={{ color: '#ef4444', padding: '6px', flexShrink: 0, marginLeft: 'auto' }}
                   onClick={() => setTempSections(tempSections.filter(s => s.id !== sec.id))}
                 >
                   <Trash2 size={16} />
@@ -978,10 +1028,8 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
                       shiftIds: currentScopeShifts.map(s => s.id),
                       branchId: scope.resolvedBranchId || undefined,
                       sectionId: scope.resolvedSectionId || undefined,
-                      durationPricing: [
-                        { durationMonths: 1, basePrice: 1500, discountType: 'None', discountValue: 0 },
-                        { durationMonths: 3, basePrice: 4500, discountType: 'Percentage', discountValue: 5 }
-                      ],
+                      ...freshPlanPricing(normalizePlanBillingCycle(cycleConfig(settings))),
+                      billingCycle: normalizePlanBillingCycle(cycleConfig(settings)),
                       active: true
                     }]);
                   }
@@ -1000,7 +1048,9 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
               No Fee Plans configured for {scope.scopeDisplayName}. Click "+ Add Custom Plan" below.
             </div>
           ) : (
-            currentPlans.map(p => (
+            currentPlans.map(p => {
+              const cycle = p.billingCycle?.mode ? effectiveCycleConfig(settings, p) : cycleConfig(settings);
+              return (
               <div key={p.id} style={{ background: '#f8fafc', border: '1px solid var(--border-light)', borderRadius: '8px', padding: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
                   <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '12px' }}>
@@ -1053,81 +1103,46 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
                   </div>
                 </div>
 
-                {/* Duration Pricing */}
-                <div>
-                  <label className="form-label" style={{ fontSize: '11px' }}>Pricing & Discounts per Duration</label>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {(p.durationPricing || []).map((dp, idx) => (
-                      <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr 1.5fr 1.5fr auto', gap: '8px', alignItems: 'center', background: '#fff', padding: '6px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                        <span style={{ fontSize: '12px', fontWeight: 600 }}>{dp.durationMonths} Mo</span>
-                        <NumericInput 
-                          className="form-input" 
-                          style={{ padding: '4px 8px', fontSize: '12px' }} 
-                          value={dp.basePrice} 
-                          onChange={e => {
-                            const val = Number(e.target.value);
-                            const updated = p.durationPricing.map((item, i) => i === idx ? { ...item, basePrice: val } : item);
-                            setTempPlans(tempPlans.map(item => item.id === p.id ? { ...item, durationPricing: updated } : item));
-                          }} 
-                        />
-                        <select 
-                          className="form-select" 
-                          style={{ padding: '4px 8px', fontSize: '12px' }}
-                          value={dp.discountType || 'None'} 
-                          onChange={e => {
-                            const dType = e.target.value;
-                            const updated = p.durationPricing.map((item, i) => i === idx ? { ...item, discountType: dType } : item);
-                            setTempPlans(tempPlans.map(item => item.id === p.id ? { ...item, durationPricing: updated } : item));
-                          }} 
-                        >
-                          <option value="None">No Discount</option>
-                          <option value="Percentage">% Discount</option>
-                          <option value="Fixed">₹ Discount</option>
-                        </select>
-                        <NumericInput 
-                          className="form-input" 
-                          style={{ padding: '4px 8px', fontSize: '12px' }} 
-                          value={dp.discountValue || 0} 
-                          onChange={e => {
-                            const val = Number(e.target.value);
-                            const updated = p.durationPricing.map((item, i) => i === idx ? { ...item, discountValue: val } : item);
-                            setTempPlans(tempPlans.map(item => item.id === p.id ? { ...item, durationPricing: updated } : item));
-                          }} 
-                        />
-                        <button type="button" className="btn btn-ghost" style={{ color: '#ef4444', padding: '2px' }} onClick={() => {
-                          const updated = p.durationPricing.filter((_, i) => i !== idx);
-                          setTempPlans(tempPlans.map(item => item.id === p.id ? { ...item, durationPricing: updated } : item));
-                        }}>
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
-                    <div style={{ display: 'flex', gap: '6px', marginTop: '6px', alignItems: 'center' }}>
-                      <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>+ Add Duration:</span>
-                      {STANDARD_DURATIONS.filter(dur => !p.durationPricing?.some(dp => dp.durationMonths === dur)).map(dur => (
-                        <button
-                          type="button"
-                          key={dur}
-                          className="btn btn-ghost"
-                          style={{ fontSize: '11px', padding: '2px 8px', border: '1px solid #cbd5e1' }}
-                          onClick={() => {
-                            const newPricing = [...(p.durationPricing || []), {
-                              durationMonths: dur,
-                              basePrice: dur * 1500,
-                              discountType: dur >= 3 ? 'Percentage' : 'None',
-                              discountValue: dur >= 3 ? 5 : 0
-                            }].sort((a, b) => a.durationMonths - b.durationMonths);
-                            setTempPlans(tempPlans.map(item => item.id === p.id ? { ...item, durationPricing: newPricing } : item));
-                          }}
-                        >
-                          +{dur} Mo
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                <PlanDurationFields
+                  value={cycle}
+                  onChange={(next) => {
+                    const prevUnit = durationUnitForCycle(cycle.mode);
+                    const nextUnit = durationUnitForCycle(next.mode);
+                    setTempPlans(tempPlans.map(item => {
+                      if (item.id !== p.id) return item;
+                      const billingCycle = normalizePlanBillingCycle(next);
+                      if (prevUnit === nextUnit) return { ...item, billingCycle };
+                      const price = inferUnitPrice(item, prevUnit);
+                      const patch = {
+                        unitPrice: price,
+                        durationPricing: compileDurationPricing(price, defaultTiers(nextUnit), nextUnit),
+                      };
+                      if (nextUnit === 'month') patch.monthlyPrice = price;
+                      else delete patch.monthlyPrice;
+                      const updated = { ...item, billingCycle, ...patch };
+                      if (nextUnit !== 'month') delete updated.monthlyPrice;
+                      return updated;
+                    }));
+                  }}
+                />
+
+                <PlanPricingFields
+                  cycleMode={cycle.mode}
+                  unitPrice={inferUnitPrice(p, durationUnitForCycle(cycle.mode))}
+                  durationPricing={p.durationPricing}
+                  onChange={(next) => {
+                    setTempPlans(tempPlans.map(item => {
+                      if (item.id !== p.id) return item;
+                      const updated = { ...item, unitPrice: next.unitPrice, durationPricing: next.durationPricing };
+                      if (next.monthlyPrice == null) delete updated.monthlyPrice;
+                      else updated.monthlyPrice = next.monthlyPrice;
+                      return updated;
+                    }));
+                  }}
+                />
               </div>
-            ))
+              );
+            })
           )}
 
           <button 
@@ -1142,7 +1157,8 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
                 shiftIds: currentScopeShifts.map(s => s.id),
                 branchId: scope.resolvedBranchId || undefined,
                 sectionId: scope.resolvedSectionId || undefined,
-                durationPricing: [{ durationMonths: 1, basePrice: 1500, discountType: 'None', discountValue: 0 }],
+                ...freshPlanPricing(normalizePlanBillingCycle(cycleConfig(settings))),
+                billingCycle: normalizePlanBillingCycle(cycleConfig(settings)),
                 active: true
               }]);
             }}

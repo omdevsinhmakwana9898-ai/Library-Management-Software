@@ -11,16 +11,46 @@ import { LibrarySettings } from './components/LibrarySettings';
 import { NewStudentModal } from './components/Modals/NewStudentModal';
 import { PrintReceiptModal } from './components/Modals/PrintReceiptModal';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Toaster } from 'react-hot-toast';
-import { ShieldAlert, ArrowLeft, LogOut, Eye, WifiOff, Cloud } from 'lucide-react';
+import toast, { Toaster } from 'react-hot-toast';
+import { ShieldAlert, ArrowLeft, LogOut, Eye, WifiOff, Cloud, KeyRound, UserRound, Sparkles, CircleUser } from 'lucide-react';
+import { ChangePasswordModal } from './auth/ChangePasswordModal';
+import { MySubscriptionModal } from './auth/MySubscriptionModal';
+import { MyProfileModal } from './auth/MyProfileModal';
+import { MySoftwarePlanModal } from './auth/MySoftwarePlanModal';
+import { initHistory, navTab, TAB_FROM_HASH } from './utils/appHistory';
+import { useBackClose } from './utils/useBackClose';
+import { NotificationsCenter } from './components/NotificationsCenter';
 import { PreviousStudentRecords } from './components/PreviousStudentRecords';
 import { SetupWizard } from './components/SetupWizard';
 import { useLibrary } from './context/LibraryContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthProvider, useAuth, prepareLocalCacheFor } from './auth/AuthContext';
+import { setCacheScope, clearCacheScope } from './utils/tenantCache';
 import { LoginScreen } from './auth/LoginScreen';
 import { SuperAdminDashboard } from './auth/SuperAdminDashboard';
-import { setTenantContext } from './utils/api';
+import { PartnerPortal } from './auth/PartnerPortal';
+import { api, setTenantContext } from './utils/api';
+import { refreshWaitingEnquiryCount } from './components/enquiry/useWaitingEnquiryCount';
+import { WhatsAppHub } from './components/WhatsAppHub';
+import { WhatsAppBanner } from './components/WhatsAppBanner';
+import { LibraryOsProfile } from './components/profile/LibraryOsProfile';
+import { LockScreen, LockedDashboard } from './components/profile/LockScreen';
+import { isLibraryLocked, isSectionAllowedWhenLocked } from './utils/subscriptionLock';
+
+function hashHasTicket() {
+  try {
+    const hash = window.location.hash || '';
+    if (new URLSearchParams(hash.slice(1)).get('ticket')) return true;
+    return /(?:^|[?&#])ticket=/.test(hash);
+  } catch {
+    return false;
+  }
+}
+
+function openSupportInProfile(setActiveTab, setProfileScreen) {
+  setProfileScreen('contact');
+  setActiveTab('profile');
+}
 
 const pageVariants = {
   initial: { opacity: 0 },
@@ -29,14 +59,68 @@ const pageVariants = {
 };
 
 export const AppContent = () => {
-  const { settings, hasPermission } = useLibrary();
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const { settings, hasPermission, currentStaff } = useLibrary();
+  const { user, subscriptionAccess, refreshSession } = useAuth();
+  const locked = isLibraryLocked(subscriptionAccess, user);
+  const canRenew = user?.role === 'client_admin' || user?.role === 'superadmin';
+  const KNOWN_TABS = ['dashboard', 'students', 'seats', 'payments', 'expenses', 'reports', 'settings', 'whatsapp', 'archives', 'notifications', 'support', 'profile'];
+  const [activeTab, setActiveTab] = useState(() => {
+    const t = TAB_FROM_HASH();
+    if (t === 'support' || hashHasTicket()) return 'profile';
+    return KNOWN_TABS.includes(t) ? t : 'dashboard';
+  });
+  const [profileScreen, setProfileScreen] = useState(() => {
+    const t = TAB_FROM_HASH();
+    return (t === 'support' || hashHasTicket()) ? 'contact' : 'home';
+  });
+  // Issue #1: browser Back/Forward move between screens. Old #/support links open Contact Us.
+  React.useEffect(() => initHistory(activeTab, (t) => {
+    if (t === 'support') { openSupportInProfile(setActiveTab, setProfileScreen); return; }
+    if (KNOWN_TABS.includes(t)) setActiveTab(t);
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { navTab(activeTab); }, [activeTab]);
+  React.useEffect(() => {
+    if (activeTab !== 'support') return;
+    openSupportInProfile(setActiveTab, setProfileScreen);
+  }, [activeTab]);
+  React.useEffect(() => {
+    if (sessionStorage.getItem('libos_wallet_topup_pending') === '1') {
+      setActiveTab('profile');
+      setProfileScreen('wallet');
+    } else if (sessionStorage.getItem('libos_checkout_pending') === '1') {
+      setActiveTab('profile');
+      setProfileScreen('subscription');
+    }
+  }, []);
+  React.useEffect(() => {
+    const onStart = () => toast('You are on the first screen. Use Sign out to leave.', { id: 'back-at-start' });
+    window.addEventListener('libos:back-at-start', onStart);
+    return () => window.removeEventListener('libos:back-at-start', onStart);
+  }, []);
+  const [whatsappPage, setWhatsappPage] = useState('messages');
+  const canManageWhatsapp = !currentStaff || currentStaff.role === 'Admin' || currentStaff.role === 'Manager' || hasPermission('settings', 'manage') || hasPermission('settings', 'edit');
+  // Deep links from anywhere (banner Reconnect, Settings shortcuts): navigateTo(tab, sub)
+  React.useEffect(() => {
+    const onNav = (e) => {
+      const { tab, sub, screen } = e.detail || {};
+      if (tab === 'whatsapp' && sub) setWhatsappPage(sub);
+      if (tab === 'support') { openSupportInProfile(setActiveTab, setProfileScreen); return; }
+      if (tab === 'profile') setProfileScreen(screen === 'support' ? 'contact' : (screen || 'home'));
+      if (tab) setActiveTab(tab);
+    };
+    window.addEventListener('libos:navigate', onNav);
+    return () => window.removeEventListener('libos:navigate', onNav);
+  }, []);
   const [isNewStudentModalOpen, setIsNewStudentModalOpen] = useState(false);
   const [waitlistPayload, setWaitlistPayload] = useState(null);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [renewActionStudent, setRenewActionStudent] = useState(null);
   const [relocateActionStudent, setRelocateActionStudent] = useState(null);
   const [activeReceiptToPrint, setActiveReceiptToPrint] = useState(null);
+  // Back closes these first (issue #1).
+  useBackClose(isNewStudentModalOpen, () => setIsNewStudentModalOpen(false));
+  useBackClose(!!selectedStudent, () => setSelectedStudent(null));
+  useBackClose(!!activeReceiptToPrint, () => setActiveReceiptToPrint(null));
   
   // Integrity deep-link action & Setup Wizard state
   const [settingsAction, setSettingsAction] = useState(null);
@@ -57,6 +141,21 @@ export const AppContent = () => {
     setIsSetupWizardOpen(true);
   };
 
+  const openProfile = (screen) => {
+    setProfileScreen(screen);
+    setActiveTab('profile');
+  };
+  const afterPayment = async () => {
+    try { await refreshSession?.(); } catch { /* auth event also refreshes */ }
+    window.dispatchEvent(new CustomEvent('libos:reload-library'));
+  };
+  const sectionBlocked = locked && !isSectionAllowedWhenLocked(activeTab);
+  const admitEnquiry = async (enquiryId) => {
+    await api.updateEnquiry(enquiryId, 'admitted');
+    refreshWaitingEnquiryCount();
+    window.dispatchEvent(new CustomEvent('libos:enquiries-changed'));
+  };
+
   return (
     <div className="app-container">
       {/* Header Bar */}
@@ -69,11 +168,12 @@ export const AppContent = () => {
         }}
       />
 
+      {!locked && <WhatsAppBanner />}
       {/* Main Page Body Container */}
       <div className="page-body-wrapper" style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         
         {/* Scroller for the main content */}
-        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <div className="page-scroller" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
           <main className="main-content">
             <AnimatePresence mode="wait">
               <motion.div
@@ -86,7 +186,14 @@ export const AppContent = () => {
                 style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
               >
                 <ErrorBoundary componentName="Active Module">
-            {!hasPermission(activeTab, 'view') && activeTab !== 'dashboard' && activeTab !== 'archives' ? (
+            {sectionBlocked ? (
+              <LockScreen
+                message={subscriptionAccess?.message}
+                canRenew={canRenew}
+                onRenew={() => openProfile('subscription')}
+                onContact={() => openProfile('contact')}
+              />
+            ) : activeTab === 'profile' ? null : !hasPermission(activeTab, 'view') && activeTab !== 'dashboard' && activeTab !== 'archives' && activeTab !== 'notifications' && activeTab !== 'support' && activeTab !== 'whatsapp' ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 24px', textAlign: 'center', minHeight: '400px' }}>
                 <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: '#fee2e2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
                   <ShieldAlert size={32} />
@@ -101,7 +208,17 @@ export const AppContent = () => {
               </div>
             ) : (
               <>
-                {activeTab === 'dashboard' && (
+                {activeTab === 'notifications' && <NotificationsCenter setActiveTab={setActiveTab} />}
+
+                {activeTab === 'dashboard' && locked && (
+                  <LockedDashboard
+                    message={subscriptionAccess?.message}
+                    canRenew={canRenew}
+                    onRenew={() => openProfile('subscription')}
+                    onContact={() => openProfile('contact')}
+                  />
+                )}
+                {activeTab === 'dashboard' && !locked && (
                   <Dashboard
                     setActiveTab={setActiveTab}
                     onOpenNewStudent={(payload) => {
@@ -132,6 +249,7 @@ export const AppContent = () => {
                     setRenewActionStudent={setRenewActionStudent}
                     relocateActionStudent={relocateActionStudent}
                     setRelocateActionStudent={setRelocateActionStudent}
+                    onPrintReceipt={handlePrintReceipt}
                   />
                 )}
 
@@ -168,6 +286,9 @@ export const AppContent = () => {
                   />
                 )}
 
+                {activeTab === 'whatsapp' && (
+                  <WhatsAppHub page={whatsappPage} setPage={setWhatsappPage} canManage={canManageWhatsapp} />
+                )}
                 {activeTab === 'archives' && (
                   <PreviousStudentRecords setActiveTab={setActiveTab} />
                 )}
@@ -188,6 +309,7 @@ export const AppContent = () => {
           }}
           onPrintReceipt={handlePrintReceipt}
           waitlistPayload={waitlistPayload}
+          onAdmitted={admitEnquiry}
         />
 
         <PrintReceiptModal
@@ -205,6 +327,14 @@ export const AppContent = () => {
         
         <Toaster position="bottom-right" />
       </div>
+      {activeTab === 'profile' && (
+        <LibraryOsProfile
+          screen={profileScreen}
+          onScreenChange={setProfileScreen}
+          onClose={() => setActiveTab('dashboard')}
+          onPaid={afterPayment}
+        />
+      )}
     </div>
   );
 };
@@ -212,7 +342,15 @@ export const AppContent = () => {
 /** Thin bar above the app showing who is signed in, read-only state, offline mode, and navigation. */
 const SessionBar = ({ libraryName, readOnly, onBack, isOffline = false, onSwitchToCloud }) => {
   const { user, logout } = useAuth();
+  const [pwOpen, setPwOpen] = useState(false);
+  const [subOpen, setSubOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [softwareOpen, setSoftwareOpen] = useState(false);
+  useBackClose(pwOpen, () => setPwOpen(false));
+  useBackClose(profileOpen, () => setProfileOpen(false));
+  useBackClose(softwareOpen, () => setSoftwareOpen(false));
   return (
+    <>
     <div id="session-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '6px 16px', fontSize: 12, background: readOnly ? '#fef3c7' : isOffline ? '#1e293b' : '#111827', color: readOnly ? '#92400e' : '#e5e7eb' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         {onBack && <button className="btn btn-ghost btn-sm" onClick={onBack} style={{ color: 'inherit' }}><ArrowLeft size={14} /> <span>All libraries</span></button>}
@@ -231,35 +369,48 @@ const SessionBar = ({ libraryName, readOnly, onBack, isOffline = false, onSwitch
           </button>
         ) : (
           <>
-            <span><span className="session-email">{user?.email} · </span>{user?.role === 'superadmin' ? 'Super Admin' : user?.role === 'client_admin' ? 'Client Admin' : 'Staff'}</span>
+            <span><span className="session-email">{user?.email} · </span>{user?.role === 'superadmin' ? 'Super Admin' : user?.role === 'client_admin' ? 'Client Admin' : user?.role === 'partner' ? 'Partner' : user?.role === 'agent' ? 'Agent' : 'Staff'}</span>
+            {!onBack && <button className="btn btn-ghost btn-sm" onClick={() => setProfileOpen(true)} style={{ color: 'inherit' }} aria-label="My Profile"><UserRound size={14} /> <span>My Profile</span></button>}
+            {!onBack && user?.role === 'client_admin' && <button className="btn btn-ghost btn-sm" onClick={() => setSoftwareOpen(true)} style={{ color: 'inherit' }} aria-label="My Software Plan"><Sparkles size={14} /> <span>My Software Plan</span></button>}
+            {!onBack && <button className="btn btn-ghost btn-sm os-profile-btn" onClick={() => window.dispatchEvent(new CustomEvent('libos:navigate', { detail: { tab: 'profile', screen: 'home' } }))} style={{ color: 'inherit' }} aria-label="My Library OS Profile"><CircleUser size={14} /> <span>My Library OS Profile</span></button>}
+            {!onBack && <button className="btn btn-ghost btn-sm" onClick={() => setPwOpen(true)} style={{ color: 'inherit' }} aria-label="Change password"><KeyRound size={14} /> <span>Password</span></button>}
             <button className="btn btn-ghost btn-sm" onClick={logout} style={{ color: 'inherit' }}><LogOut size={14} /> <span>Sign out</span></button>
+            {subOpen && <MySubscriptionModal libraryName={libraryName} onClose={() => setSubOpen(false)} />}
+            {profileOpen && <MyProfileModal onClose={() => setProfileOpen(false)} />}
+            {softwareOpen && <MySoftwarePlanModal onClose={() => setSoftwareOpen(false)} />}
+            {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} hasPassword={!(user?.authProviders?.length && !user.authProviders.includes('password'))} />}
           </>
         )}
       </div>
     </div>
+    </>
   );
 };
 
 const LibraryWorkspace = ({ libraryId, libraryName, readOnly = false, lockedStaffId = null, onBack, isOffline = false, onSwitchToCloud }) => {
   const [ready, setReady] = useState(false);
   React.useLayoutEffect(() => {
-    if (!isOffline && libraryId) {
+    if (isOffline) {
+      setCacheScope({ offline: true }); // offline mode keeps its original local cache
+    } else if (libraryId) {
       setTenantContext(onBack ? { libraryId, readOnly } : {});
-      prepareLocalCacheFor(`${libraryId}${readOnly ? ':ro' : ''}`);
+      prepareLocalCacheFor(libraryId, { readOnly });
+    } else {
+      clearCacheScope();
     }
     setReady(true);
   }, [libraryId, readOnly, onBack, isOffline]);
 
   if (!ready) return null;
   return (
-    <div className="lib-workspace" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <div className="lib-workspace" style={{ display: 'flex', flexDirection: 'column' }}>
       <SessionBar libraryName={libraryName} readOnly={readOnly} onBack={onBack} isOffline={isOffline} onSwitchToCloud={onSwitchToCloud} />
       <div style={{ flex: 1, minHeight: 0 }}>
-        <LibraryProvider key={`${libraryId || 'local'}-${readOnly}-${isOffline}`} readOnly={readOnly} lockedStaffId={lockedStaffId}>
-          <ErrorBoundary>
+        <ErrorBoundary>
+          <LibraryProvider key={`${libraryId || 'local'}-${readOnly}-${isOffline}`} readOnly={readOnly} lockedStaffId={lockedStaffId}>
             <AppContent />
-          </ErrorBoundary>
-        </LibraryProvider>
+          </LibraryProvider>
+        </ErrorBoundary>
       </div>
     </div>
   );
@@ -268,43 +419,24 @@ const LibraryWorkspace = ({ libraryId, libraryName, readOnly = false, lockedStaf
 const RoleRouter = () => {
   const { status, user, library } = useAuth();
   const [drill, setDrill] = useState(null); // super admin: { library, readOnly }
-  const [offlineMode, setOfflineMode] = useState(() => {
-    return localStorage.getItem('library_mode_preference') === 'offline';
-  });
 
-  const handleContinueOffline = () => {
-    localStorage.setItem('library_mode_preference', 'offline');
-    setOfflineMode(true);
-  };
-
-  const handleSwitchToCloud = () => {
-    localStorage.removeItem('library_mode_preference');
-    setOfflineMode(false);
-  };
-
-  if (offlineMode) {
-    return (
-      <LibraryWorkspace
-        libraryId="local-workspace"
-        libraryName="Local Library"
-        isOffline={true}
-        onSwitchToCloud={handleSwitchToCloud}
-      />
-    );
-  }
+  // Older builds stored this when someone chose local mode. Do not honour it:
+  // login and the connecting screen no longer offer that path.
+  React.useEffect(() => {
+    try { localStorage.removeItem('library_mode_preference'); } catch { /* private mode */ }
+  }, []);
 
   if (status === 'loading') {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, background: 'var(--bg-primary, #f8fafc)' }}>
         <div style={{ fontSize: 36 }}>📖</div>
-        <div style={{ fontSize: 16, fontWeight: 600 }}>Connecting to Library Management OS…</div>
-        <button className="btn btn-secondary btn-sm" onClick={handleContinueOffline}>Continue in Local Offline Mode</button>
+        <div style={{ fontSize: 16, fontWeight: 600 }}>Connecting to My Library OS…</div>
       </div>
     );
   }
 
   if (status !== 'authenticated' || !user) {
-    return <LoginScreen onContinueOffline={handleContinueOffline} />;
+    return <LoginScreen />;
   }
 
   if (user.role === 'superadmin') {
@@ -319,6 +451,20 @@ const RoleRouter = () => {
       );
     }
     return <SuperAdminDashboard onOpenLibrary={(lib, readOnly) => setDrill({ library: lib, readOnly })} />;
+  }
+
+  if (user.role === 'partner' || user.role === 'agent') {
+    if (drill) {
+      return (
+        <LibraryWorkspace
+          libraryId={drill.library.libraryId}
+          libraryName={drill.library.name}
+          readOnly
+          onBack={() => { setTenantContext({}); setDrill(null); }}
+        />
+      );
+    }
+    return <PartnerPortal onOpenLibrary={(lib) => setDrill({ library: lib, readOnly: true })} />;
   }
 
   return (

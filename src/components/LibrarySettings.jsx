@@ -6,16 +6,32 @@ import {
   Beaker, CheckCircle2, ChevronRight, X, AlertCircle, Calendar,
   UserPlus, UserCheck, Power, Shield, Check, Minus, Phone, Mail, Users
 } from 'lucide-react';
+import { groupSeatTypesBySection, groupShiftsBySection } from '../utils/sectionGroups';
 import { motion, AnimatePresence } from 'framer-motion';
 import { NumericInput } from './NumericInput';
 import { SetupWizard } from './SetupWizard';
+import { navigateTo } from '../utils/whatsappStatus';
+import { TeamAccess } from './TeamAccess';
 import { resolveConfigurationScope, matchesScope } from '../utils/scopeResolver';
 import { 
   STAFF_MODULES, STAFF_ACTIONS, STAFF_ROLES, 
-  createEmptyPermissions, getDefaultPermissionsForRole, countAllowedActions 
+  createEmptyPermissions, getDefaultPermissionsForRole, countAllowedActions, sanitizeStaffPermissions,
+  FINANCIAL_MODULE_IDS, FINANCIAL_MATRIX, applyAllowAllFinancial, isWalletBlockedRole, emptyModuleActions,
 } from '../utils/staffPermissions';
 import { getCanonicalSeatTypes } from '../utils/seatTypeUtils';
+import { cycleConfig, effectiveCycleConfig, normalizePlanBillingCycle, CYCLE_MODE_LABELS } from '../utils/billingCycle';
+import { compileDurationPricing, defaultTiers, durationUnitForCycle, formatDurationLabel, inferUnitPrice, planPricingUnit } from '../utils/pricingCalculator';
+import { DEFAULT_EXPIRED_PERIOD_DAYS } from '../utils/subscriptionLifecycle.js';
+import { PlanDurationFields } from './PlanDurationFields';
+import { PlanPricingFields } from './PlanPricingFields';
 import toast from 'react-hot-toast';
+import { api } from '../utils/api';
+import { copyText } from '../utils/copyText';
+import { EnquiryQrCard } from './enquiry/EnquiryQrCard';
+import { EnquiryFormCard } from './enquiry/EnquiryFormCard';
+import { BrandImageField } from './BrandImageField';
+import { DEFAULT_LIBRARY_LOGO } from '../utils/libraryLogo';
+import { receiptInstructionsEditorValue } from '../utils/receiptInstructions';
 
 const ALL_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -29,9 +45,13 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
     copyFromBranch, getSetupStatus, generateTestStudents, clearTestData,
     addStaffMember, updateStaffMember, toggleStaffStatus, deleteStaffMember, hasPermission
   } = useLibrary();
+  const { lockedStaffId } = useLibrary();
+  const isOwnerSession = !lockedStaffId;
+
+  const canManageWhatsapp = !currentStaff || currentStaff.role === 'Admin' || currentStaff.role === 'Manager' || hasPermission?.('settings', 'manage') || hasPermission?.('settings', 'edit');
 
   // Navigation tab for clean organization (Problem 22: Level 2 Category Tabs)
-  const [activeTab, setActiveTab] = useState('plans'); // 'plans' | 'shifts' | 'seatTypes' | 'sections' | 'branches' | 'admission' | 'billing' | 'staff' | 'data'
+  const [activeTab, setActiveTab] = useState('plans'); // 'plans' | 'shifts' | 'seatTypes' | 'sections' | 'branches' | 'admission' | 'billing' | 'whatsapp' | 'staff' | 'data'
   const [viewLevel, setViewLevel] = useState('branches'); // 'branches' | 'modules' | 'module-view'
 
   // Setup Wizard Modal State
@@ -60,6 +80,8 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
       setPlanName(`${targetName} Plan`);
       setPlanShiftIds([settingsAction.recordId]);
       setPlanSeatTypeId(seatTypes[0]?.id || '');
+      setPlanCycle(cycleConfig(settings));
+      setPlanCycleCustom(true);
       setEditingPlanId(null);
       setActiveTab('plans');
       setViewLevel('module-view');
@@ -73,9 +95,12 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
         setPlanSeatTypeId(plan.seatTypeId || seatTypes[0]?.id || '');
         setPlanSectionId(plan.sectionId || '');
         setPlanShiftIds(plan.shiftIds || []);
-        setPlanPricing(plan.durationPricing && plan.durationPricing.length > 0 ? plan.durationPricing : [
-          { durationMonths: 1, basePrice: plan.price || 1500, discountType: 'None', discountValue: 0 }
-        ]);
+        const savedCycle = plan.billingCycle?.mode ? effectiveCycleConfig(settings, plan) : cycleConfig(settings);
+        const unit = durationUnitForCycle(savedCycle.mode);
+        setPlanUnitPrice(inferUnitPrice(plan, unit));
+        setPlanPricing(plan.durationPricing && plan.durationPricing.length > 0 ? plan.durationPricing : compileDurationPricing(plan.price || 1500, defaultTiers(unit), unit));
+        setPlanCycle(savedCycle);
+        setPlanCycleCustom(!!plan.billingCycle?.mode);
         setActiveTab('plans');
         setViewLevel('module-view');
         setIsPlanModalOpen(true);
@@ -101,9 +126,18 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
     upiId: settings.upiId || '',
     upiQrUrl: settings.upiQrUrl || '',
     receiptFooter: settings.receiptFooter || '',
+    receiptInstructions: receiptInstructionsEditorValue(settings.receiptInstructions),
     billingCycleMode: settings.billingCycleMode || 'ANNIVERSARY',
     gracePeriodDays: settings.gracePeriodDays ?? 3,
-    calendarBillingDay: settings.calendarBillingDay ?? 1
+    expiredPeriodDays: settings.expiredPeriodDays ?? DEFAULT_EXPIRED_PERIOD_DAYS,
+    calendarBillingDay: settings.calendarBillingDay ?? 1,
+    cycleDays: settings.cycleDays ?? 30,
+    cycleAnchorDate: settings.cycleAnchorDate || '',
+    managerCanEditAmount: settings.managerCanEditAmount !== false,
+    staffCanEditAmount: settings.staffCanEditAmount === true,
+    idProofRequirement: settings.idProofRequirement || 'Required',
+    idProofDeadlineDays: settings.idProofDeadlineDays ?? 7,
+    paymentProofMode: settings.paymentProofMode || 'OPTIONAL'
   });
 
   // Keep billingFormData in sync if settings changes externally
@@ -117,10 +151,19 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
       taxId: settings.taxId || '',
       upiId: settings.upiId || '',
       upiQrUrl: settings.upiQrUrl || '',
-      receiptFooter: settings.receiptFooter || '',
+        receiptFooter: settings.receiptFooter || '',
+      receiptInstructions: receiptInstructionsEditorValue(settings.receiptInstructions),
       billingCycleMode: settings.billingCycleMode || 'ANNIVERSARY',
       gracePeriodDays: settings.gracePeriodDays ?? 3,
-      calendarBillingDay: settings.calendarBillingDay ?? 1
+    expiredPeriodDays: settings.expiredPeriodDays ?? DEFAULT_EXPIRED_PERIOD_DAYS,
+    calendarBillingDay: settings.calendarBillingDay ?? 1,
+      cycleDays: settings.cycleDays ?? 30,
+      cycleAnchorDate: settings.cycleAnchorDate || '',
+      managerCanEditAmount: settings.managerCanEditAmount !== false,
+      staffCanEditAmount: settings.staffCanEditAmount === true,
+      idProofRequirement: settings.idProofRequirement || 'Required',
+      idProofDeadlineDays: settings.idProofDeadlineDays ?? 7,
+    paymentProofMode: settings.paymentProofMode || 'OPTIONAL'
     });
   }, [settings]);
 
@@ -132,6 +175,12 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
     { id: "doc-photo", name: "Photograph", requirement: "Required", active: true },
     { id: "doc-other", name: "Other Document", requirement: "Not Required", active: true }
   ]);
+  // Restore saved document types when settings arrive after the first paint.
+  React.useEffect(() => {
+    if (Array.isArray(settings.documentTypes) && settings.documentTypes.length > 0) {
+      setDocTypes(settings.documentTypes);
+    }
+  }, [settings.documentTypes]);
   const [newDocName, setNewDocName] = useState('');
   const [newDocReq, setNewDocReq] = useState('Can Be Submitted Later');
 
@@ -150,9 +199,10 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
   const [planSeatTypeId, setPlanSeatTypeId] = useState(seatTypes[0]?.id || '');
   const [planSectionId, setPlanSectionId] = useState('');
   const [planShiftIds, setPlanShiftIds] = useState([]);
-  const [planPricing, setPlanPricing] = useState([
-    { durationMonths: 1, basePrice: 1500, discountType: 'None', discountValue: 0 }
-  ]);
+  const [planPricing, setPlanPricing] = useState(() => compileDurationPricing(1500, defaultTiers('month'), 'month'));
+  const [planUnitPrice, setPlanUnitPrice] = useState(1500);
+  const [planCycle, setPlanCycle] = useState(() => cycleConfig(settings));
+  const [planCycleCustom, setPlanCycleCustom] = useState(true);
 
   // Centered Modals & Entity Editing State
   const [isSectionModalOpen, setIsSectionModalOpen] = useState(false);
@@ -162,6 +212,7 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
   const [editingSectionId, setEditingSectionId] = useState(null);
   const [editingBranchId, setEditingBranchId] = useState(null);
   const [permSearch, setPermSearch] = useState('');
+  const [allowAllFinancial, setAllowAllFinancial] = useState(false);
 
   // Seat Type Editing State
   const [newSeatTypeName, setNewSeatTypeName] = useState('');
@@ -195,6 +246,7 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
 
   // 👥 Staff Management State
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
+  const [staffInvite, setStaffInvite] = useState(null);
   const [editingStaffId, setEditingStaffId] = useState(null);
   const [staffFormData, setStaffFormData] = useState({
     name: '',
@@ -228,9 +280,19 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
       upiId: billingFormData.upiId,
       upiQrUrl: billingFormData.upiQrUrl,
       receiptFooter: billingFormData.receiptFooter,
+      receiptInstructions: billingFormData.receiptInstructions ?? '',
       billingCycleMode: billingFormData.billingCycleMode,
       gracePeriodDays: Number(billingFormData.gracePeriodDays) || 3,
-      calendarBillingDay: Number(billingFormData.calendarBillingDay) || 1
+      expiredPeriodDays: Number.isFinite(Number(billingFormData.expiredPeriodDays)) ? Number(billingFormData.expiredPeriodDays) : DEFAULT_EXPIRED_PERIOD_DAYS,
+      calendarBillingDay: Number(billingFormData.calendarBillingDay) || 1,
+      cycleDays: Math.max(1, Number(billingFormData.cycleDays) || 30),
+      cycleAnchorDate: billingFormData.cycleAnchorDate || '',
+      // Issue #9: only the owner may change who can edit amounts (server enforces too).
+      ...(isOwnerSession ? {
+        managerCanEditAmount: !!billingFormData.managerCanEditAmount,
+        staffCanEditAmount: !!billingFormData.staffCanEditAmount,
+        paymentProofMode: (billingFormData.paymentProofMode || 'OPTIONAL').toUpperCase()
+      } : {})
     }));
     toast.success('Library branding, contact & billing configuration saved!');
   };
@@ -321,9 +383,12 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
     setPlanSeatTypeId(seatTypes[0]?.id || '');
     setPlanSectionId('');
     setPlanShiftIds([]);
-    setPlanPricing([
-      { durationMonths: 1, basePrice: 1500, discountType: 'None', discountValue: 0 }
-    ]);
+    const cycle = cycleConfig(settings);
+    const unit = durationUnitForCycle(cycle.mode);
+    setPlanUnitPrice(1500);
+    setPlanPricing(compileDurationPricing(1500, defaultTiers(unit), unit));
+    setPlanCycle(cycle);
+    setPlanCycleCustom(true);
     setIsPlanModalOpen(true);
   };
 
@@ -333,9 +398,12 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
     setPlanSeatTypeId(p.seatTypeId || seatTypes[0]?.id || '');
     setPlanSectionId(p.sectionId || '');
     setPlanShiftIds(p.shiftIds || []);
-    setPlanPricing(p.durationPricing && p.durationPricing.length > 0 ? p.durationPricing : [
-      { durationMonths: 1, basePrice: p.price || 1500, discountType: 'None', discountValue: 0 }
-    ]);
+    const savedCycle = p.billingCycle?.mode ? effectiveCycleConfig(settings, p) : cycleConfig(settings);
+    const unit = durationUnitForCycle(savedCycle.mode);
+    setPlanUnitPrice(inferUnitPrice(p, unit));
+    setPlanPricing(p.durationPricing && p.durationPricing.length > 0 ? p.durationPricing : compileDurationPricing(p.price || 1500, defaultTiers(unit), unit));
+    setPlanCycle(savedCycle);
+    setPlanCycleCustom(!!p.billingCycle?.mode);
     setIsPlanModalOpen(true);
   };
 
@@ -344,16 +412,27 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
     if (!planName.trim()) return toast.error('Plan name is required.');
     if (!planSeatTypeId) return toast.error('Please assign a Seat Type to this plan.');
     if (planShiftIds.length === 0) return toast.error('Assign at least one shift to this plan.');
+    const billingCycle = (editingPlanId ? planCycleCustom : true)
+      ? normalizePlanBillingCycle(planCycle)
+      : null;
 
     if (editingPlanId) {
-      setPlans(prev => prev.map(p => p.id === editingPlanId ? {
-        ...p,
-        name: planName.trim(),
-        seatTypeId: planSeatTypeId,
-        sectionId: planSectionId || undefined,
-        shiftIds: planShiftIds,
-        durationPricing: planPricing
-      } : p));
+      setPlans(prev => prev.map(p => {
+        if (p.id !== editingPlanId) return p;
+        const next = {
+          ...p,
+          name: planName.trim(),
+          seatTypeId: planSeatTypeId,
+          sectionId: planSectionId || undefined,
+          shiftIds: planShiftIds,
+          unitPrice: planUnitPrice,
+          durationPricing: planPricing,
+          ...(billingCycle ? { billingCycle } : {}),
+        };
+        if (durationUnitForCycle(planCycle?.mode) === 'month') next.monthlyPrice = planUnitPrice;
+        else delete next.monthlyPrice;
+        return next;
+      }));
       setEditingPlanId(null);
       toast.success('Fee Plan updated.');
     } else {
@@ -363,7 +442,10 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
         seatTypeId: planSeatTypeId,
         sectionId: planSectionId || scope.resolvedSectionId || undefined,
         shiftIds: planShiftIds,
+        unitPrice: planUnitPrice,
+        ...(durationUnitForCycle(planCycle?.mode) === 'month' ? { monthlyPrice: planUnitPrice } : {}),
         durationPricing: planPricing,
+        ...(billingCycle ? { billingCycle } : {}),
         branchId: selectedBranchId !== 'all' ? selectedBranchId : (scope.resolvedBranchId || undefined),
         libraryId: settings.libraryId,
         active: true
@@ -616,10 +698,12 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
       branchId: activeBranchId !== 'all' ? activeBranchId : 'all',
       status: 'Active'
     });
+    setStaffInvite(null);
     setIsStaffModalOpen(true);
   };
 
   const handleOpenEditStaff = (staff) => {
+    setStaffInvite(null);
     setEditingStaffId(staff.id);
     setStaffFormData({
       name: staff.name || '',
@@ -632,7 +716,35 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
     setIsStaffModalOpen(true);
   };
 
-  const handleSaveStaffForm = (e) => {
+  const closeStaffModal = () => {
+    setIsStaffModalOpen(false);
+    setStaffInvite(null);
+  };
+
+  const createStaffInvite = async (staff) => {
+    setStaffInvite({ staff, link: '', error: '', busy: true });
+    try {
+      const result = await api.createInvite({
+        email: staff.email.trim(),
+        name: staff.name,
+        role: 'staff',
+        staffId: staff.id,
+        permissions: sanitizeStaffPermissions(staff.permissions, staff.role),
+      });
+      const link = result?.link || '';
+      setStaffInvite({
+        staff,
+        link,
+        error: link ? '' : 'Invite link was not returned. You can try again.',
+        busy: false,
+      });
+      if (link) toast.success('Invite created.');
+    } catch (err) {
+      setStaffInvite({ staff, link: '', error: err.message || 'Could not create the invite.', busy: false });
+    }
+  };
+
+  const handleSaveStaffForm = async (e) => {
     e.preventDefault();
     if (!staffFormData.name.trim()) {
       return toast.error('Please enter full name of staff member');
@@ -643,11 +755,22 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
 
     if (editingStaffId) {
       const ok = updateStaffMember(editingStaffId, staffFormData);
-      if (ok) setIsStaffModalOpen(false);
-    } else {
-      const created = addStaffMember(staffFormData);
-      if (created) setIsStaffModalOpen(false);
+      if (ok) closeStaffModal();
+      return;
     }
+    if (!staffFormData.email.trim()) {
+      return toast.error('Email is required to invite this staff member.');
+    }
+    const created = addStaffMember(staffFormData);
+    if (!created) return;
+    await createStaffInvite(created);
+  };
+
+  const handleCopyStaffInvite = async () => {
+    if (!staffInvite?.link) return;
+    const ok = await copyText(staffInvite.link);
+    if (ok) toast.success('Copied');
+    else toast.error('Could not copy the link. Please select and copy it manually.');
   };
 
   const handleOpenPermMatrix = (staff) => {
@@ -656,14 +779,22 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
     const cloned = {};
     STAFF_MODULES.forEach(mod => {
       cloned[mod.id] = {
+        ...emptyModuleActions(),
         view: Boolean(currentPerms[mod.id]?.view),
         create: Boolean(currentPerms[mod.id]?.create),
         edit: Boolean(currentPerms[mod.id]?.edit),
         delete: Boolean(currentPerms[mod.id]?.delete),
         approve: Boolean(currentPerms[mod.id]?.approve),
-        manage: Boolean(currentPerms[mod.id]?.manage)
+        manage: Boolean(currentPerms[mod.id]?.manage),
+        print: Boolean(currentPerms[mod.id]?.print),
+        share: Boolean(currentPerms[mod.id]?.share),
+        export: Boolean(currentPerms[mod.id]?.export),
+        collect: Boolean(currentPerms[mod.id]?.collect),
+        ...(mod.id === 'reports' ? { netProfit: Boolean(currentPerms.reports?.netProfit) } : {}),
       };
     });
+    if (isWalletBlockedRole(staff.role)) cloned.wallet = emptyModuleActions();
+    setAllowAllFinancial(Boolean(currentPerms.allowAllFinancial));
     setTempPermissions(cloned);
     setIsPermMatrixModalOpen(true);
   };
@@ -724,9 +855,38 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
     toast.success(`Loaded preset permissions for "${roleName}"`);
   };
 
+  const handleAllowAllFinancial = (on) => {
+    const staff = staffMembers.find(s => s.id === targetPermStaffId);
+    const role = staff?.role;
+    setAllowAllFinancial(on);
+    if (!on) return;
+    const next = applyAllowAllFinancial(tempPermissions, role);
+    const cloned = { ...tempPermissions };
+    FINANCIAL_MODULE_IDS.forEach(id => { cloned[id] = next[id]; });
+    setTempPermissions(cloned);
+  };
+
+  const handleToggleFinancial = (moduleId, keys) => {
+    const staff = staffMembers.find(s => s.id === targetPermStaffId);
+    if (moduleId === 'wallet' && isWalletBlockedRole(staff?.role)) return;
+    setAllowAllFinancial(false);
+    setTempPermissions(prev => {
+      const modObj = { ...emptyModuleActions(), ...(prev[moduleId] || {}) };
+      const nextVal = !keys.every(k => modObj[k]);
+      keys.forEach(k => { modObj[k] = nextVal; });
+      if (nextVal) modObj.view = true;
+      if (moduleId === 'reports') {
+        /* net profit stays its own switch */
+      }
+      return { ...prev, [moduleId]: modObj };
+    });
+  };
+
   const handleSavePermMatrix = () => {
     if (!targetPermStaffId) return;
-    const ok = updateStaffMember(targetPermStaffId, { permissions: tempPermissions });
+    const ok = updateStaffMember(targetPermStaffId, {
+      permissions: { ...tempPermissions, allowAllFinancial },
+    });
     if (ok) {
       setIsPermMatrixModalOpen(false);
       setTargetPermStaffId(null);
@@ -896,6 +1056,8 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
               { id: 'branches', label: '🏢 Branch Details' },
               { id: 'admission', label: '📄 Document Requirements' },
               { id: 'billing', label: '⚙️ General & Billing Settings' },
+              { id: 'whatsapp', label: '💬 WhatsApp' },
+              { id: 'whatsappMessages', label: '📨 Messages' },
               { id: 'staff', label: '👥 Staff Permissions' },
               { id: 'data', label: '💾 Data Hub & Testing' }
             ].map(tab => (
@@ -987,12 +1149,16 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                   <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                     <strong>Shifts:</strong> {applicableShifts.map(s => s.name).join(', ') || <span style={{ color: '#ef4444' }}>None assigned</span>}
                   </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                    <strong>Duration:</strong> {CYCLE_MODE_LABELS[effectiveCycleConfig(settings, p).mode] || 'Anniversary'}
+                    {p.billingCycle?.mode ? '' : ' (library default)'}
+                  </div>
 
                   <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)' }}>DURATION PRICING:</span>
                     {(p.durationPricing || []).map((dp, i) => (
                       <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                        <span>{dp.durationMonths} Mo</span>
+                        <span>{formatDurationLabel(dp.durationMonths, dp.durationUnit || planPricingUnit(p))}</span>
                         <span style={{ fontWeight: 600 }}>₹{dp.basePrice?.toLocaleString()} {dp.discountType && dp.discountType !== 'None' ? `(Offer: ${dp.discountValue}${dp.discountType === 'Percentage' ? '%' : '₹'})` : ''}</span>
                       </div>
                     ))}
@@ -1029,8 +1195,10 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
             </button>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
-            {displayedShifts.map(sh => {
+          {/* Issue #6: shifts under the sections whose plans use them (derived, nothing stored). */}
+          {(() => {
+            const shiftGroups = groupShiftsBySection(displayedShifts, displayedPlans, displayedSections);
+            const renderShift = (sh, gkey) => {
               const isUnsynced = getUnsyncedShifts ? getUnsyncedShifts().some(s => s.id === sh.id) : false;
               let scopeLabel = 'All Branches';
               if (sh.branchId && sh.branchId !== 'all') {
@@ -1039,7 +1207,7 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
               }
 
               return (
-                <div key={sh.id} style={{ padding: '14px', background: '#f8fafc', border: isUnsynced ? '1px solid #fde68a' : '1px solid var(--border-light)', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div key={`${gkey}-${sh.id}`} data-shift={sh.name} style={{ padding: '14px', background: '#f8fafc', border: isUnsynced ? '1px solid #fde68a' : '1px solid var(--border-light)', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <strong style={{ fontSize: '14px' }}>{sh.name}</strong>
@@ -1076,8 +1244,18 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                   </div>
                 </div>
               );
-            })}
-          </div>
+            };
+            return shiftGroups.map(g => (
+              <div key={g.key} className="section-group" style={{ marginBottom: '16px' }}>
+                {(shiftGroups.length > 1 || g.key !== '__shared') && (
+                  <h4 className="section-group-title" style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px 0' }}>{g.title}</h4>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px' }}>
+                  {g.items.map(({ item }) => renderShift(item, g.key))}
+                </div>
+              </div>
+            ));
+          })()}
         </div>
       )}
 
@@ -1106,11 +1284,10 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
             </button>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
-            {displayedSeatTypes.map(st => {
-              const physicalSeats = (seats || []).filter(s => s.seatTypeId === st.id);
-              const seatCount = physicalSeats.length;
-
+          {/* Issue #5: seat types under their section heading (derived, nothing stored). */}
+          {(() => {
+            const groups = groupSeatTypesBySection(displayedSeatTypes, seats || [], displayedSections);
+            const renderCard = (st, seatCount, gkey) => {
               let capacitySubtitle = '';
               if (st.allocationMode === 'Fixed') {
                 capacitySubtitle = `Fixed (${seatCount} ${seatCount === 1 ? 'seat' : 'seats'})`;
@@ -1123,7 +1300,7 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
               }
 
               return (
-                <div key={st.id} style={{ padding: '14px 16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid var(--border-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div key={`${gkey}-${st.id}`} data-seat-type={st.name} style={{ padding: '14px 16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid var(--border-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <strong style={{ fontSize: '14px' }}>{st.name}</strong>
                     <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px', fontWeight: 500 }}>
@@ -1140,8 +1317,18 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                   </div>
                 </div>
               );
-            })}
-          </div>
+            };
+            return groups.map(g => (
+              <div key={g.key} className="section-group" style={{ marginBottom: '16px' }}>
+                {(groups.length > 1 || g.key !== '__shared') && (
+                  <h4 className="section-group-title" style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px 0' }}>{g.title}</h4>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
+                  {g.items.map(({ item, seatCount }) => renderCard(item, seatCount, g.key))}
+                </div>
+              </div>
+            ));
+          })()}
         </div>
       )}
 
@@ -1426,11 +1613,16 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                   >
                     <option value="ANNIVERSARY">Anniversary-Based (Join Date to same date next month)</option>
                     <option value="CALENDAR_MONTH">Calendar-Month Based (1st to month-end)</option>
+                    <option value="N_DAYS">Every N Days (fixed library cycle)</option>
+                    <option value="YEARLY">Yearly (library-wide year)</option>
                   </select>
                   <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
                     {billingFormData.billingCycleMode === 'ANNIVERSARY' 
                       ? 'Example: Joined 15 Feb → Due 15 Mar (coverage 15 Feb–14 Mar).' 
-                      : 'Example: Billed on 1st of each calendar month.'}
+                      : billingFormData.billingCycleMode === 'CALENDAR_MONTH' ? 'Example: Billed on 1st of each calendar month. New joiners pay pro-rated days to month-end.'
+                      : billingFormData.billingCycleMode === 'N_DAYS' ? 'Example: 30-day cycle; joining on day 10 pays for days 10–30 only.'
+                      : 'Example: One library year; joining mid-year pays the remaining days only.'}
+                    {' '}Existing students keep their current dates; they can be aligned at their next renewal.
                   </span>
                 </div>
 
@@ -1442,7 +1634,19 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                     onChange={e => setBillingFormData(p => ({ ...p, gracePeriodDays: Number(e.target.value) || 0 }))} 
                   />
                   <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                    Days after due date before subscription is marked Expired.
+                    Days after the plan end date while the desk stays held. Changing this does not move deadlines for students already admitted or renewed.
+                  </span>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" style={{ fontSize: '12px', fontWeight: 600 }}>Expired period before auto-cancel (Days)</label>
+                  <NumericInput
+                    className="form-input"
+                    value={billingFormData.expiredPeriodDays}
+                    onChange={e => setBillingFormData(p => ({ ...p, expiredPeriodDays: Number(e.target.value) || 0 }))}
+                  />
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                    Days the student stays Expired after grace, with the desk already free, before automatic cancellation. New admissions and renewals use the number you save here. Students already on a plan keep the days saved when their period started.
                   </span>
                 </div>
 
@@ -1456,6 +1660,51 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                     />
                   </div>
                 )}
+                {(billingFormData.billingCycleMode === 'N_DAYS' || billingFormData.billingCycleMode === 'YEARLY') && (
+                  <div className="form-group">
+                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 600 }}>Cycle Start Date</label>
+                    <input type="date" className="form-input" value={billingFormData.cycleAnchorDate} onChange={e => setBillingFormData(p => ({ ...p, cycleAnchorDate: e.target.value }))} />
+                  </div>
+                )}
+                {billingFormData.billingCycleMode === 'N_DAYS' && (
+                  <div className="form-group">
+                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 600 }}>Cycle Length (Days)</label>
+                    <NumericInput className="form-input" value={billingFormData.cycleDays} onChange={e => setBillingFormData(p => ({ ...p, cycleDays: Number(e.target.value) || 0 }))} />
+                  </div>
+                )}
+                <div className="form-group">
+                  <label className="form-label" style={{ fontSize: '12px', fontWeight: 600 }}>Who can change fee amounts</label>
+                  <label style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '13px' }}>
+                    <input type="checkbox" checked disabled /> Admin (always)
+                  </label>
+                  <label style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '13px' }}>
+                    <input type="checkbox" data-testid="perm-manager" disabled={!isOwnerSession} checked={!!billingFormData.managerCanEditAmount} onChange={e => setBillingFormData(p => ({ ...p, managerCanEditAmount: e.target.checked }))} /> Manager
+                  </label>
+                  <label style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '13px' }}>
+                    <input type="checkbox" data-testid="perm-staff" disabled={!isOwnerSession} checked={!!billingFormData.staffCanEditAmount} onChange={e => setBillingFormData(p => ({ ...p, staffCanEditAmount: e.target.checked }))} /> Other staff
+                  </label>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Every changed amount is recorded in the audit log.{isOwnerSession ? '' : ' Only the library owner can change this.'}</span>
+                </div>
+                <div className="form-group">
+                  <label className="form-label" style={{ fontSize: '12px', fontWeight: 600 }} htmlFor="payment-proof-mode">Payment proof photos</label>
+                  <select
+                    id="payment-proof-mode"
+                    data-testid="payment-proof-mode"
+                    className="form-select"
+                    value={billingFormData.paymentProofMode || 'OPTIONAL'}
+                    disabled={!isOwnerSession}
+                    onChange={e => setBillingFormData(p => ({ ...p, paymentProofMode: e.target.value }))}
+                  >
+                    <option value="OFF">Off — do not ask for proof</option>
+                    <option value="OPTIONAL">Optional — staff may attach photos</option>
+                    <option value="REQUIRED">Required — a payment cannot be saved without a photo</option>
+                  </select>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    {isOwnerSession
+                      ? 'You can still add, replace, or remove proof photos on an existing payment from the ledger or student history.'
+                      : 'Only the library owner can change this setting or edit proof photos on a saved payment.'}
+                  </span>
+                </div>
               </div>
 
               {/* Library Identity & Contact Settings */}
@@ -1468,6 +1717,15 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                   <label className="form-label">Library Name *</label>
                   <input type="text" className="form-input" value={billingFormData.name} onChange={(e) => setBillingFormData(p => ({ ...p, name: e.target.value }))} required />
                 </div>
+                <BrandImageField
+                  label="Library logo"
+                  value={billingFormData.logo}
+                  onChange={(logo) => setBillingFormData(p => ({ ...p, logo }))}
+                  fallbackText={DEFAULT_LIBRARY_LOGO}
+                  documentKey="library-logo"
+                  testId="settings-library-logo"
+                  help="Used in the header, receipts, QR posters, the public enquiry form and report PDFs. Upload, replace or remove it any time."
+                />
                 <div className="form-group">
                   <label className="form-label">Phone</label>
                   <input type="text" className="form-input" value={billingFormData.phone} onChange={(e) => setBillingFormData(p => ({ ...p, phone: e.target.value }))} />
@@ -1481,12 +1739,31 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                   <input type="text" className="form-input" value={billingFormData.address} onChange={(e) => setBillingFormData(p => ({ ...p, address: e.target.value }))} />
                 </div>
                 <div className="form-group">
+                  <label className="form-label">Tax ID / GST</label>
+                  <input type="text" className="form-input" data-testid="settings-tax-id" value={billingFormData.taxId} onChange={(e) => setBillingFormData(p => ({ ...p, taxId: e.target.value }))} />
+                </div>
+                <div className="form-group">
                   <label className="form-label">UPI ID (For QR Fee Collections)</label>
                   <input type="text" className="form-input" value={billingFormData.upiId} onChange={(e) => setBillingFormData(p => ({ ...p, upiId: e.target.value }))} />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Receipt Footer Note</label>
-                  <input type="text" className="form-input" value={billingFormData.receiptFooter} onChange={(e) => setBillingFormData(p => ({ ...p, receiptFooter: e.target.value }))} />
+                  <input type="text" className="form-input" data-testid="settings-receipt-footer" value={billingFormData.receiptFooter} onChange={(e) => setBillingFormData(p => ({ ...p, receiptFooter: e.target.value }))} />
+                </div>
+                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                  <label className="form-label" htmlFor="settings-receipt-instructions">Receipt instructions</label>
+                  <textarea
+                    id="settings-receipt-instructions"
+                    className="form-input"
+                    data-testid="settings-receipt-instructions"
+                    rows={4}
+                    value={billingFormData.receiptInstructions}
+                    onChange={(e) => setBillingFormData(p => ({ ...p, receiptInstructions: e.target.value }))}
+                    placeholder={"Fees are non-refundable.\nKeep this receipt for your records."}
+                  />
+                  <span style={{ display: 'block', marginTop: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Each line is printed as a bullet under Instructions on the receipt. These defaults are used until you save your own. Clear the box if you do not want an Instructions section.
+                  </span>
                 </div>
               </div>
 
@@ -1645,6 +1922,19 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
               <RefreshCw size={14} /> Open Factory Reset Confirmation
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* TAB 4.5: WHATSAPP INTEGRATION */}
+      {/* ======================================================== */}
+      {(activeTab === 'whatsapp' || activeTab === 'whatsappMessages') && (
+        <div className="premium-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px', alignItems: 'flex-start' }}>
+          <h3 style={{ fontSize: '16px', fontWeight: 700, margin: 0 }}>WhatsApp has moved</h3>
+          <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0 }}>WhatsApp login, messages, templates and reminders now have their own WhatsApp section in the menu.</p>
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => navigateTo('whatsapp', activeTab === 'whatsapp' ? 'login' : 'messages')}>
+            Open {activeTab === 'whatsapp' ? 'WhatsApp Login' : 'Messages'}
+          </button>
         </div>
       )}
 
@@ -1888,6 +2178,9 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
               </table>
             </div>
           </div>
+
+          {/* Team logins & invites (client_admin / superadmin only) */}
+          <TeamAccess />
         </div>
       )}
       
@@ -1993,7 +2286,7 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                     </p>
                   </div>
                 </div>
-                <button type="button" className="btn btn-ghost" onClick={() => setIsStaffModalOpen(false)} style={{ padding: '6px' }}>
+                <button type="button" className="btn btn-ghost" onClick={closeStaffModal} style={{ padding: '6px' }}>
                   <X size={18} />
                 </button>
               </div>
@@ -2031,7 +2324,8 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                       id="staff-email-input"
                       type="email" 
                       className="form-input" 
-                      placeholder="e.g. staff@library.com" 
+                      placeholder="e.g. staff@library.com"
+                      required={editingStaffId ? false : true}
                       value={staffFormData.email} 
                       onChange={e => setStaffFormData(p => ({ ...p, email: e.target.value }))} 
                     />
@@ -2092,13 +2386,40 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                   </div>
                 </div>
 
+                {!editingStaffId && staffInvite && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', background: '#f8fafc', border: '1px solid var(--border-light)', borderRadius: '8px' }}>
+                    <label className="form-label" htmlFor="staff-invite-link" style={{ fontSize: '12px', fontWeight: 600 }}>Invite link</label>
+                    {staffInvite.error && (
+                      <p style={{ margin: 0, fontSize: '13px', color: '#b91c1c' }}>{staffInvite.error}</p>
+                    )}
+                    {staffInvite.link && (
+                      <input id="staff-invite-link" className="form-input" type="text" readOnly value={staffInvite.link} onFocus={e => e.target.select()} />
+                    )}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {staffInvite.link && (
+                        <>
+                          <button type="button" className="btn btn-secondary" onClick={handleCopyStaffInvite}>Copy</button>
+                          <a className="btn btn-secondary" href={`https://wa.me/?text=${encodeURIComponent(staffInvite.link)}`} target="_blank" rel="noreferrer">Share</a>
+                        </>
+                      )}
+                      {staffInvite.error && (
+                        <button type="button" className="btn btn-primary" disabled={staffInvite.busy} onClick={() => createStaffInvite(staffInvite.staff)}>
+                          Retry invite
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
-                  <button type="button" className="btn btn-ghost" onClick={() => setIsStaffModalOpen(false)}>
-                    Cancel
+                  <button type="button" className="btn btn-ghost" onClick={closeStaffModal}>
+                    {staffInvite?.link ? 'Done' : 'Cancel'}
                   </button>
-                  <button id="btn-save-staff" type="submit" className="btn btn-primary" style={{ background: '#4f46e5', borderColor: '#4338ca' }}>
-                    <Save size={15} /> {editingStaffId ? 'Update Staff Details' : 'Save Staff Member'}
-                  </button>
+                  {editingStaffId || !staffInvite ? (
+                    <button id="btn-save-staff" type="submit" className="btn btn-primary" style={{ background: '#4f46e5', borderColor: '#4338ca' }}>
+                      <Save size={15} /> {editingStaffId ? 'Update Staff Details' : 'Save Staff Member'}
+                    </button>
+                  ) : null}
                 </div>
               </form>
             </motion.div>
@@ -2201,13 +2522,89 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                     style={{ fontSize: '12px', padding: '4px 10px', width: '160px' }}
                   />
                   <div style={{ fontSize: '12px', fontWeight: 600, color: '#4338ca', background: '#e0e7ff', padding: '4px 10px', borderRadius: '6px', whiteSpace: 'nowrap' }}>
-                    {countAllowedActions(tempPermissions)} of 72 allowed
+                    {countAllowedActions(tempPermissions)} actions allowed
                   </div>
                 </div>
               </div>
 
               {/* Matrix Scrollable Table */}
               <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
+                <div style={{ marginBottom: '16px', padding: '12px 14px', border: '1px solid #c7d2fe', borderRadius: '10px', background: '#eef2ff' }}>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
+                    <input
+                      id="allow-all-financial"
+                      type="checkbox"
+                      checked={allowAllFinancial}
+                      onChange={e => handleAllowAllFinancial(e.target.checked)}
+                      style={{ marginTop: '3px' }}
+                    />
+                    <span>
+                      <span style={{ fontWeight: 700, color: '#312e81' }}>Allow all financial permissions</span>
+                      <span style={{ display: 'block', fontSize: '12px', color: '#4338ca', marginTop: '2px' }}>
+                        Turns on every money action this role is allowed to have: collections, expenses, reports, export, and Wallet.
+                        Librarians never get Wallet, even with this on.
+                      </span>
+                    </span>
+                  </label>
+                  {(() => {
+                    const st = staffMembers.find(s => s.id === targetPermStaffId);
+                    const blocked = isWalletBlockedRole(st?.role);
+                    return (
+                      <div style={{ marginTop: '12px', overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                          <thead>
+                            <tr>
+                              <th style={{ textAlign: 'left', padding: '4px' }}>Financial area</th>
+                              {FINANCIAL_MATRIX.map(col => <th key={col.id} style={{ padding: '4px' }}>{col.label}</th>)}
+                              <th style={{ padding: '4px' }}>Net Profit</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {STAFF_MODULES.filter(m => FINANCIAL_MODULE_IDS.includes(m.id)).map(mod => {
+                              const modPerms = tempPermissions[mod.id] || {};
+                              const locked = mod.id === 'wallet' && blocked;
+                              return (
+                                <tr key={mod.id}>
+                                  <td style={{ padding: '4px', fontWeight: 600 }}>{mod.name}{locked ? ' (not for Librarians)' : ''}</td>
+                                  {FINANCIAL_MATRIX.map(col => {
+                                    const on = col.keys.every(k => modPerms[k]);
+                                    return (
+                                      <td key={col.id} style={{ textAlign: 'center' }}>
+                                        <input
+                                          type="checkbox"
+                                          aria-label={`${mod.name} ${col.label}`}
+                                          checked={locked ? false : on}
+                                          disabled={locked}
+                                          onChange={() => handleToggleFinancial(mod.id, col.keys)}
+                                        />
+                                      </td>
+                                    );
+                                  })}
+                                  <td style={{ textAlign: 'center' }}>
+                                    {mod.id === 'reports' ? (
+                                      <input
+                                        type="checkbox"
+                                        aria-label="Net Profit"
+                                        checked={Boolean(modPerms.netProfit)}
+                                        onChange={() => {
+                                          setAllowAllFinancial(false);
+                                          setTempPermissions(prev => ({
+                                            ...prev,
+                                            reports: { ...emptyModuleActions(), ...(prev.reports || {}), netProfit: !prev.reports?.netProfit },
+                                          }));
+                                        }}
+                                      />
+                                    ) : '—'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
                 <table className="data-grid" style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 2 }}>
@@ -2220,7 +2617,7 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                     </tr>
                   </thead>
                   <tbody>
-                    {STAFF_MODULES.filter(m => !permSearch || m.name.toLowerCase().includes(permSearch.toLowerCase()) || m.description.toLowerCase().includes(permSearch.toLowerCase())).map(mod => {
+                    {STAFF_MODULES.filter(m => !permSearch || m.name.toLowerCase().includes(permSearch.toLowerCase()) || String(m.desc || m.description || '').toLowerCase().includes(permSearch.toLowerCase())).map(mod => {
                       const modPerms = tempPermissions[mod.id] || {};
                       return (
                         <tr key={mod.id}>
@@ -2383,52 +2780,28 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                   </div>
                 </div>
 
-                {/* Duration Pricing Editor */}
-                <div>
-                  <label className="form-label" style={{ fontSize: '12px', fontWeight: 600 }}>Duration Pricing Tiers & Offers</label>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {planPricing.map((dp, idx) => (
-                      <div key={idx} style={{ display: 'grid', gridTemplateColumns: '70px 1.5fr 1.5fr 1fr auto', gap: '8px', alignItems: 'center', background: '#f8fafc', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                        <span style={{ fontSize: '13px', fontWeight: 700 }}>{dp.durationMonths} Mo</span>
-                        <NumericInput className="form-input" placeholder="Price (₹)" value={dp.basePrice} onChange={e => {
-                          const price = Number(e.target.value);
-                          setPlanPricing(planPricing.map((item, i) => i === idx ? { ...item, basePrice: price } : item));
-                        }} />
-                        <select className="form-select" value={dp.discountType || 'None'} onChange={e => {
-                          const dType = e.target.value;
-                          setPlanPricing(planPricing.map((item, i) => i === idx ? { ...item, discountType: dType } : item));
-                        }}>
-                          <option value="None">No Offer</option>
-                          <option value="Percentage">% Discount</option>
-                          <option value="Fixed">₹ Discount</option>
-                        </select>
-                        <NumericInput className="form-input" placeholder="Offer" value={dp.discountValue || 0} onChange={e => {
-                          const val = Number(e.target.value);
-                          setPlanPricing(planPricing.map((item, i) => i === idx ? { ...item, discountValue: val } : item));
-                        }} />
-                        <button type="button" className="btn btn-ghost" style={{ color: '#ef4444', padding: '4px' }} onClick={() => setPlanPricing(planPricing.filter((_, i) => i !== idx))}>
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
+                <PlanDurationFields
+                  value={planCycle}
+                  onChange={(next) => {
+                    const prevUnit = durationUnitForCycle(planCycle?.mode);
+                    const nextUnit = durationUnitForCycle(next?.mode);
+                    setPlanCycle(next);
+                    setPlanCycleCustom(true);
+                    if (prevUnit !== nextUnit) {
+                      setPlanPricing(compileDurationPricing(planUnitPrice, defaultTiers(nextUnit), nextUnit));
+                    }
+                  }}
+                />
 
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
-                      {[1, 2, 3, 6, 12].filter(m => !planPricing.some(p => p.durationMonths === m)).map(m => (
-                        <button
-                          key={m}
-                          type="button"
-                          className="btn btn-ghost"
-                          style={{ fontSize: '11px', border: '1px solid #cbd5e1', padding: '3px 8px', borderRadius: '4px' }}
-                          onClick={() => {
-                            setPlanPricing([...planPricing, { durationMonths: m, basePrice: m * 1500, discountType: 'None', discountValue: 0 }].sort((a,b) => a.durationMonths - b.durationMonths));
-                          }}
-                        >
-                          + Add {m} Mo
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                <PlanPricingFields
+                  cycleMode={planCycle?.mode}
+                  unitPrice={planUnitPrice}
+                  durationPricing={planPricing}
+                  onChange={(next) => {
+                    setPlanUnitPrice(next.unitPrice);
+                    setPlanPricing(next.durationPricing);
+                  }}
+                />
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '14px', paddingTop: '14px', borderTop: '1px solid #f1f5f9' }}>
                   <button type="button" className="btn btn-ghost" onClick={() => setIsPlanModalOpen(false)}>Cancel</button>
@@ -2667,6 +3040,10 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
           </div>
         )}
       </AnimatePresence>
+
+      <EnquiryQrCard />
+
+      <EnquiryFormCard />
 
       {/* ======================================================== */}
       {/* MODAL: SETUP WIZARD (EDIT / RESUME MODE) */}

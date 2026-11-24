@@ -1,47 +1,107 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { LogIn, ShieldCheck } from 'lucide-react';
-import { useAuth } from './AuthContext';
+import React, { useEffect, useState } from 'react';
+import { LogIn, ShieldCheck, ArrowLeft, KeyRound } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { useAuth, googleOAuthErrorMessage } from './AuthContext';
+import { api } from '../utils/api';
+import { SignupPanel } from './SignupPanel';
+import { ContactChoices } from '../components/ContactChoices';
+import { readInviteToken } from '../utils/inviteToken';
 
-const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim();
+const GoogleIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+  </svg>
+);
 
-function loadGoogleScript() {
-  return new Promise((resolve, reject) => {
-    if (window.google?.accounts?.id) return resolve();
-    const existing = document.getElementById('gsi-client');
-    if (existing) { existing.addEventListener('load', resolve); return; }
-    const s = document.createElement('script');
-    s.id = 'gsi-client';
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.async = true; s.defer = true;
-    s.onload = resolve; s.onerror = () => reject(new Error('Could not load Google sign-in'));
-    document.head.appendChild(s);
-  });
-}
+const ROLE_LABELS = { staff: 'Staff', client_admin: 'Co-admin', superadmin: 'Super Admin' };
+const roleLabel = (role) => ROLE_LABELS[role] || role || 'Staff';
 
-export function LoginScreen({ onContinueOffline }) {
-  const { loginWithPassword, loginWithGoogle } = useAuth();
+export function LoginScreen() {
+  const { loginWithPassword, completeLogin, oauthError, googleSignupPending, clearGoogleSignupPending, googleResetToken, clearGoogleResetToken } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const googleBtnRef = useRef(null);
+  const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
+  const [signup, setSignup] = useState(null);
+
+  // 'login' | 'forgot' | 'invite'
+  const [mode, setMode] = useState(() => (readInviteToken() ? 'invite' : ((typeof window !== 'undefined' && /[?&]referral=/.test(window.location.hash || '')) ? 'signup' : 'login')));
+  const [inviteToken] = useState(readInviteToken);
+
+  // Forgot password: email, mobile, or linked Google.
+  const [forgotStep, setForgotStep] = useState(1);
+  const [forgotMethod, setForgotMethod] = useState('email'); // email | mobile | google
+  const [forgotMobile, setForgotMobile] = useState('');
+  const [forgotMessage, setForgotMessage] = useState('');
+  const [resendWait, setResendWait] = useState(0);
+  const [otp, setOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Invite acceptance state
+  const [inviteInfo, setInviteInfo] = useState(null);
+  const [inviteLoading, setInviteLoading] = useState(Boolean(inviteToken));
+  const [inviteError, setInviteError] = useState('');
+  const [inviteName, setInviteName] = useState('');
+  const [invitePassword, setInvitePassword] = useState('');
+  const [inviteConfirm, setInviteConfirm] = useState('');
+  const [inviteBusy, setInviteBusy] = useState(false);
 
   useEffect(() => {
-    if (!GOOGLE_CLIENT_ID) return; // Google button only when configured
     let cancelled = false;
-    loadGoogleScript().then(() => {
-      if (cancelled || !googleBtnRef.current) return;
-      window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: async ({ credential }) => {
-          setError(''); setBusy(true);
-          try { await loginWithGoogle(credential); } catch (e) { setError(e.message); } finally { setBusy(false); }
-        },
-      });
-      window.google.accounts.id.renderButton(googleBtnRef.current, { theme: 'outline', size: 'large', width: 320, text: 'signin_with' });
-    }).catch(e => setError(e.message));
+    api.authConfig()
+      .then(cfg => { if (!cancelled) setGoogleEnabled(Boolean(cfg?.googleEnabled)); })
+      .catch(() => {});
+    // Issue #15: the signup link only appears when the server has signup switched on.
+    api.signupConfig?.()
+      .then(cfg => { if (!cancelled) setSignup(cfg?.enabled ? cfg : null); })
+      .catch(() => {});
     return () => { cancelled = true; };
-  }, [loginWithGoogle]);
+  }, []);
+
+  useEffect(() => {
+    if (googleSignupPending && signup) {
+      setMode('signup');
+    }
+  }, [googleSignupPending, signup]);
+
+  useEffect(() => {
+    if (!googleResetToken) return;
+    setMode('forgot');
+    setForgotMethod('google');
+    setForgotStep(2);
+    setForgotMessage('Google confirmed this linked account. Choose a new My Library OS password. This does not change your Google password.');
+    setError('');
+  }, [googleResetToken]);
+
+  useEffect(() => {
+    if (resendWait <= 0) return undefined;
+    const timer = setTimeout(() => setResendWait((seconds) => seconds - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendWait]);
+
+  useEffect(() => {
+    if (!inviteToken) return;
+    let cancelled = false;
+    setInviteLoading(true);
+    setInviteError('');
+    api.inviteInfo(inviteToken)
+      .then(info => {
+        if (cancelled) return;
+        setInviteInfo(info);
+        setInviteName(info?.name || '');
+      })
+      .catch(() => {
+        if (!cancelled) setInviteError('This invite link is invalid, expired or already used.');
+      })
+      .finally(() => { if (!cancelled) setInviteLoading(false); });
+    return () => { cancelled = true; };
+  }, [inviteToken]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -49,60 +109,407 @@ export function LoginScreen({ onContinueOffline }) {
     try { await loginWithPassword(email, password); } catch (err) { setError(err.message); } finally { setBusy(false); }
   };
 
+  const backToLogin = () => {
+    if (typeof window !== 'undefined' && (window.location.hash || '').includes('invite=')) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+    setMode('login');
+    setError('');
+    setForgotStep(1);
+    setForgotMethod('email');
+    setForgotMessage('');
+    setResendWait(0);
+    clearGoogleResetToken?.();
+    setOtp('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setPassword('');
+    setInvitePassword('');
+    setInviteConfirm('');
+  };
+
+  const openForgot = () => {
+    setError('');
+    setMode('forgot');
+    setForgotStep(1);
+    setForgotMessage('');
+  };
+
+  const sendCode = async (e) => {
+    e?.preventDefault();
+    setError(''); setBusy(true);
+    try {
+      const res = forgotMethod === 'mobile'
+        ? await api.forgotPasswordMobile(forgotMobile)
+        : await api.forgotPassword(email);
+      setForgotMessage(res?.message || (forgotMethod === 'mobile'
+        ? 'If that mobile number is registered, a 6-digit code has been sent on WhatsApp.'
+        : 'If that email is registered, a 6-digit code has been sent.'));
+      setForgotStep(2);
+      setResendWait(30);
+    } catch (err) {
+      setError(err.message);
+    } finally { setBusy(false); }
+  };
+
+  const submitReset = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (forgotMethod !== 'google' && !/^\d{6}$/.test(otp.trim())) {
+      setError(forgotMethod === 'mobile' ? 'Enter the 6-digit code from WhatsApp.' : 'Enter the 6-digit code from your email.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    setBusy(true);
+    try {
+      if (forgotMethod === 'google') {
+        await api.resetPasswordGoogle(googleResetToken, newPassword);
+      } else if (forgotMethod === 'mobile') {
+        await api.resetPasswordMobile(forgotMobile, otp.trim(), newPassword);
+      } else {
+        await api.resetPassword(email, otp.trim(), newPassword);
+      }
+      toast.success(forgotMethod === 'google' ? 'My Library OS password updated. Please sign in.' : 'Password changed. Please sign in.');
+      clearGoogleResetToken?.();
+      setMode('login');
+      setForgotStep(1);
+      setForgotMethod('email');
+      setForgotMessage('');
+      setResendWait(0);
+      setOtp('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPassword('');
+    } catch (err) {
+      setError(err.message);
+    } finally { setBusy(false); }
+  };
+
+  const submitInvite = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!inviteName.trim()) {
+      setError('Please enter your name.');
+      return;
+    }
+    if (invitePassword.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+    if (invitePassword !== inviteConfirm) {
+      setError('Passwords do not match.');
+      return;
+    }
+    setInviteBusy(true);
+    try {
+      const result = await api.acceptInvite({ token: inviteToken, name: inviteName.trim(), password: invitePassword });
+      window.history.replaceState(null, '', window.location.pathname);
+      completeLogin(result);
+    } catch (err) {
+      setError(err.message);
+    } finally { setInviteBusy(false); }
+  };
+
+  const alertMessage = error || ((mode === 'login' || mode === 'forgot') && oauthError ? googleOAuthErrorMessage(oauthError) : '');
+  const subtitle = mode === 'signup' ? 'Start your library' : mode === 'invite' ? 'Accept your invitation' : mode === 'forgot' ? 'Recover your account' : 'Sign in to continue';
+  const inviteLibraryName = typeof inviteInfo?.library === 'string' ? inviteInfo.library : inviteInfo?.library?.name;
+
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'var(--bg-primary, #f8fafc)' }}>
-      <div className="premium-card" style={{ width: '100%', maxWidth: 400, padding: 32 }}>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-primary, #f8fafc)' }}>
+    <div style={{ flex: 1, display: 'flex', alignItems: mode === 'signup' ? 'flex-start' : 'center', justifyContent: 'center', padding: 24 }}>
+      <style>{`
+        #google-signin:hover { background: #f8fafc !important; }
+        #google-signin:focus-visible { outline: 2px solid var(--brand-accent, #2563eb); outline-offset: 2px; }
+      `}</style>
+      <div className="premium-card" style={{ width: '100%', maxWidth: mode === 'signup' ? 480 : 400, padding: 32 }}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{ fontSize: 40 }}>📖</div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, marginTop: 8 }}>Library Management OS</h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Sign in to continue</p>
+          <img
+            src="/logo-full.png"
+            alt="My Library OS"
+            style={{ display: 'block', width: '100%', maxWidth: 240, height: 'auto', margin: '0 auto' }}
+          />
+          <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginTop: 12 }}>{subtitle}</p>
         </div>
 
-        {GOOGLE_CLIENT_ID && (
+        {mode === 'login' && googleEnabled && (
           <>
-            <div ref={googleBtnRef} id="google-signin-button" style={{ display: 'flex', justifyContent: 'center', minHeight: 44 }} />
+            <a
+              id="google-signin"
+              href={api.googleStartUrl()}
+              onClick={() => setRedirecting(true)}
+              style={{
+                display: 'flex', width: '100%', minHeight: 44, boxSizing: 'border-box',
+                alignItems: 'center', justifyContent: 'center', gap: 10, padding: '8px 16px',
+                background: '#ffffff', border: '1px solid var(--border-light, #e5e7eb)', borderRadius: 8,
+                color: 'var(--text-primary, #111827)', fontSize: 14, fontWeight: 600,
+                textDecoration: 'none', cursor: 'pointer',
+              }}
+            >
+              <GoogleIcon />
+              <span>{redirecting ? 'Redirecting…' : 'Continue with Google'}</span>
+            </a>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '20px 0', color: 'var(--text-tertiary)', fontSize: 12 }}>
               <div style={{ flex: 1, height: 1, background: 'var(--border-light, #e5e7eb)' }} /> or use email <div style={{ flex: 1, height: 1, background: 'var(--border-light, #e5e7eb)' }} />
             </div>
           </>
         )}
 
-        <form onSubmit={submit}>
-          <div className="form-group">
-            <label className="form-label" htmlFor="login-email">Email</label>
-            <input id="login-email" className="form-input" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="login-password">Password</label>
-            <input id="login-password" className="form-input" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required />
-          </div>
-          {error && <div role="alert" style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-          <button id="login-submit" className="btn btn-primary" type="submit" disabled={busy} style={{ width: '100%', justifyContent: 'center' }}>
-            <LogIn size={16} /> <span>{busy ? 'Signing in…' : 'Sign in'}</span>
-          </button>
-        </form>
+        {mode === 'login' && (
+          <>
+            <form onSubmit={submit}>
+              <div className="form-group">
+                <label className="form-label" htmlFor="login-email">Email or mobile</label>
+                <input id="login-email" className="form-input" type="text" autoComplete="username" placeholder="you@example.com or 98765 43210" value={email} onChange={e => setEmail(e.target.value)} required />
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="login-password">Password</label>
+                <input id="login-password" className="form-input" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required />
+              </div>
+              {alertMessage && <div role="alert" style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{alertMessage}</div>}
+              <button id="login-submit" className="btn btn-primary" type="submit" disabled={busy} style={{ width: '100%', justifyContent: 'center' }}>
+                <LogIn size={16} /> <span>{busy ? 'Signing in…' : 'Sign in'}</span>
+              </button>
+            </form>
 
-        {onContinueOffline && (
-          <div style={{ marginTop: 14, textAlign: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '14px 0 10px', color: 'var(--text-tertiary)', fontSize: 12 }}>
-              <div style={{ flex: 1, height: 1, background: 'var(--border-light, #e5e7eb)' }} /> or <div style={{ flex: 1, height: 1, background: 'var(--border-light, #e5e7eb)' }} />
+            <div style={{ marginTop: 12, textAlign: 'center' }}>
+              <button
+                id="forgot-password-link"
+                type="button"
+                className="btn btn-ghost"
+                onClick={openForgot}
+                style={{ fontSize: 13, color: 'var(--brand-primary, #2563eb)', padding: '4px 8px' }}
+              >
+                Forgot password?
+              </button>
             </div>
+            {signup && (
+              <div style={{ marginTop: 4, textAlign: 'center', fontSize: 13 }}>
+                New library?{' '}
+                <button id="signup-link" type="button" className="btn btn-ghost" onClick={() => { setError(''); setMode('signup'); }} style={{ fontSize: 13, color: 'var(--brand-primary, #2563eb)', padding: '4px 8px' }}>Create an account</button>
+              </div>
+            )}
+          </>
+        )}
+
+        {mode === 'signup' && signup && (
+          <SignupPanel
+            plans={signup.plans || []}
+            googleSignup={Boolean(signup.googleSignup)}
+            paymentsConfigured={Boolean(signup.paymentsConfigured)}
+            mobileSignupAvailable={Boolean(signup.mobileSignupAvailable ?? signup.mobileSignup)}
+            googlePendingToken={googleSignupPending || ''}
+            onBack={() => { clearGoogleSignupPending?.(); backToLogin(); }}
+            onDone={(result) => { clearGoogleSignupPending?.(); completeLogin(result); }}
+          />
+        )}
+
+        {mode === 'forgot' && (
+          <div>
             <button
-              id="continue-offline-btn"
               type="button"
-              className="btn btn-secondary"
-              onClick={onContinueOffline}
-              style={{ width: '100%', justifyContent: 'center', fontSize: 13 }}
+              className="btn btn-ghost"
+              onClick={backToLogin}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '4px 8px', marginBottom: 8 }}
             >
-              ⚡ Continue in Local / Offline Mode
+              <ArrowLeft size={15} /> Back to sign in
             </button>
+
+            <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 4px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <KeyRound size={16} /> {forgotStep === 1 ? 'Reset your password' : (forgotMethod === 'google' ? 'Set a My Library OS password' : 'Enter your reset code')}
+            </h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: '0 0 16px 0' }}>
+              {forgotStep === 1
+                ? 'Choose email, mobile, or the Google account already linked to this library. Mobile login stays password-only.'
+                : forgotMethod === 'google'
+                  ? 'This updates only your My Library OS password. It does not change your Google password.'
+                  : forgotMethod === 'mobile'
+                    ? `Enter the 6-digit WhatsApp code sent to ${forgotMobile || 'your mobile'} and choose a new password.`
+                    : `Enter the 6-digit code sent to ${email || 'your email'} and choose a new password.`}
+            </p>
+
+            {forgotStep === 1 && (
+              <div id="forgot-method-picker" role="group" aria-label="Recovery method" style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <button id="forgot-method-email" type="button" className={`btn ${forgotMethod === 'email' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setForgotMethod('email')}>Email</button>
+                <button id="forgot-method-mobile" type="button" className={`btn ${forgotMethod === 'mobile' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setForgotMethod('mobile')}>Mobile</button>
+                <button id="forgot-method-google" type="button" className={`btn ${forgotMethod === 'google' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setForgotMethod('google')}>Google</button>
+              </div>
+            )}
+
+            {forgotStep === 2 && forgotMessage && (
+              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af', fontSize: 13, borderRadius: 8, padding: '10px 12px', marginBottom: 12 }}>
+                {forgotMessage}
+              </div>
+            )}
+
+            {forgotStep === 1 && forgotMethod === 'google' ? (
+              <div>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: '0 0 12px' }}>
+                  Continue with the Google account already linked to My Library OS. After that you set a library password only.
+                </p>
+                {alertMessage && <div role="alert" style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{alertMessage}</div>}
+                <a id="forgot-google" className="btn btn-primary" href={`${api.googleStartUrl()}?recovery=1`} style={{ width: '100%', justifyContent: 'center', textDecoration: 'none' }}>
+                  Continue with linked Google
+                </a>
+              </div>
+            ) : (
+            <form onSubmit={forgotStep === 1 ? sendCode : submitReset}>
+              {forgotStep === 1 ? (
+                forgotMethod === 'mobile' ? (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="forgot-mobile">Mobile number</label>
+                    <input id="forgot-mobile" className="form-input" type="tel" inputMode="tel" autoComplete="tel" value={forgotMobile} onChange={e => setForgotMobile(e.target.value)} required />
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '8px 0 0' }}>We'll send a 6-digit code on WhatsApp. Signing in still uses mobile and password, with no login code.</p>
+                  </div>
+                ) : (
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="forgot-email">Email</label>
+                    <input id="forgot-email" className="form-input" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required />
+                  </div>
+                )
+              ) : (
+                <>
+                  {forgotMethod !== 'google' && (
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="forgot-otp">6-digit code</label>
+                      <input
+                        id="forgot-otp"
+                        className="form-input"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        pattern="\d{6}"
+                        placeholder="123456"
+                        value={otp}
+                        onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        required
+                      />
+                      <button id="forgot-resend" type="button" className="btn btn-ghost btn-sm" disabled={busy || resendWait > 0} onClick={sendCode} style={{ marginTop: 8, padding: '4px 0' }}>
+                        {resendWait > 0 ? `Resend code in ${resendWait}s` : 'Resend code'}
+                      </button>
+                    </div>
+                  )}
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="forgot-new-password">{forgotMethod === 'google' ? 'New My Library OS password' : 'New password'}</label>
+                    <input id="forgot-new-password" className="form-input" type="password" autoComplete="new-password" value={newPassword} onChange={e => setNewPassword(e.target.value)} required />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="forgot-confirm-password">Confirm password</label>
+                    <input id="forgot-confirm-password" className="form-input" type="password" autoComplete="new-password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required />
+                  </div>
+                </>
+              )}
+
+              {alertMessage && <div role="alert" style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{alertMessage}</div>}
+
+              <button className="btn btn-primary" type="submit" disabled={busy} style={{ width: '100%', justifyContent: 'center' }}>
+                <span>{busy ? 'Please wait…' : (forgotStep === 1 ? 'Send code' : (forgotMethod === 'google' ? 'Save My Library OS password' : 'Reset password'))}</span>
+              </button>
+            </form>
+            )}
           </div>
         )}
 
-        <p style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', marginTop: 16, color: 'var(--text-tertiary)', fontSize: 12 }}>
-          <ShieldCheck size={14} /> Accounts are created by your administrator.
-        </p>
+        {mode === 'invite' && (
+          <div>
+            {inviteLoading && (
+              <p style={{ color: 'var(--text-secondary)', fontSize: 14, textAlign: 'center' }}>Loading invitation…</p>
+            )}
+
+            {!inviteLoading && inviteError && (
+              <div>
+                <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: 13, borderRadius: 8, padding: '12px', marginBottom: 16 }}>
+                  {inviteError}
+                </div>
+                <button type="button" className="btn btn-secondary" onClick={backToLogin} style={{ width: '100%', justifyContent: 'center' }}>
+                  Go to sign in
+                </button>
+              </div>
+            )}
+
+            {!inviteLoading && !inviteError && inviteInfo && (
+              <>
+                <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 6px 0' }}>Accept invitation</h2>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: '0 0 16px 0' }}>
+                  You've been invited to <strong>{inviteLibraryName || 'this library'}</strong> as <strong>{roleLabel(inviteInfo.role)}</strong> ({inviteInfo.email})
+                </p>
+
+                {googleEnabled && (
+                  <>
+                    <a
+                      id="google-invite"
+                      href={`${api.googleStartUrl()}?invite=${encodeURIComponent(inviteToken)}`}
+                      onClick={() => setRedirecting(true)}
+                      style={{
+                        display: 'flex', width: '100%', minHeight: 44, boxSizing: 'border-box',
+                        alignItems: 'center', justifyContent: 'center', gap: 10, padding: '8px 16px',
+                        background: '#ffffff', border: '1px solid var(--border-light, #e5e7eb)', borderRadius: 8,
+                        color: 'var(--text-primary, #111827)', fontSize: 14, fontWeight: 600, textDecoration: 'none',
+                      }}
+                    >
+                      <GoogleIcon />
+                      <span>{redirecting ? 'Redirecting…' : `Join with Google (${inviteInfo.email})`}</span>
+                    </a>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '16px 0', color: 'var(--text-tertiary)', fontSize: 12 }}>
+                      <div style={{ flex: 1, height: 1, background: 'var(--border-light, #e5e7eb)' }} /> or set a password <div style={{ flex: 1, height: 1, background: 'var(--border-light, #e5e7eb)' }} />
+                    </div>
+                  </>
+                )}
+                <form onSubmit={submitInvite}>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="invite-name">Your name</label>
+                    <input id="invite-name" className="form-input" type="text" autoComplete="name" value={inviteName} onChange={e => setInviteName(e.target.value)} required />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="invite-password">Password</label>
+                    <input id="invite-password" className="form-input" type="password" autoComplete="new-password" value={invitePassword} onChange={e => setInvitePassword(e.target.value)} required />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="invite-confirm-password">Confirm password</label>
+                    <input id="invite-confirm-password" className="form-input" type="password" autoComplete="new-password" value={inviteConfirm} onChange={e => setInviteConfirm(e.target.value)} required />
+                  </div>
+
+                  {alertMessage && <div role="alert" style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{alertMessage}</div>}
+
+                  <button className="btn btn-primary" type="submit" disabled={inviteBusy} style={{ width: '100%', justifyContent: 'center' }}>
+                    <span>{inviteBusy ? 'Joining…' : 'Join library'}</span>
+                  </button>
+                </form>
+
+                <div style={{ marginTop: 12, textAlign: 'center' }}>
+                  <button type="button" className="btn btn-ghost" onClick={backToLogin} style={{ fontSize: 13, padding: '4px 8px' }}>
+                    Back to sign in
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {mode === 'login' && (
+          <p style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', marginTop: 16, color: 'var(--text-tertiary)', fontSize: 12 }}>
+            <ShieldCheck size={14} /> Accounts are created by your administrator.
+          </p>
+        )}
       </div>
+    </div>
+    {mode === 'login' && (
+      <div style={{ maxWidth: 440, margin: '0 auto 8px', padding: '0 16px' }}>
+        <ContactChoices />
+      </div>
+    )}
+    <footer style={{ padding: '4px 16px 20px', textAlign: 'center', fontSize: 12, lineHeight: 1.7, color: 'var(--text-tertiary, #6b7280)' }}>
+      <a href="https://mylibraryos.in/privacy" style={{ color: 'inherit' }}>Privacy Policy</a>
+      <span aria-hidden="true"> · </span>
+      <a href="https://mylibraryos.in/terms" style={{ color: 'inherit' }}>Terms & Conditions</a>
+      <span aria-hidden="true"> · </span>
+      <a href="https://mylibraryos.in/refund" style={{ color: 'inherit' }}>Refund & Cancellation Policy</a>
+      <span aria-hidden="true"> · </span>
+      <a href="https://mylibraryos.in/contact" style={{ color: 'inherit' }}>Contact Us</a>
+    </footer>
     </div>
   );
 }

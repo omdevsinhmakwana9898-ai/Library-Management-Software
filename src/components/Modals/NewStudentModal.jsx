@@ -1,20 +1,43 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { DocPreview } from '../DocPreview';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useLibrary } from '../../context/LibraryContext';
 import { X, UserPlus, ShieldAlert, AlertCircle, Clock, Check, RefreshCw } from 'lucide-react';
 import { NumericInput } from '../NumericInput';
 import toast from 'react-hot-toast';
-import { calculatePricing } from '../../utils/pricingCalculator';
+import { calculatePricing, planPricingUnit, durationUnitWord } from '../../utils/pricingCalculator';
 import { handleSplitAmountChange, handleAddSplitComponent, handleRemoveSplitComponent, validateSplitPayment } from '../../utils/splitPaymentUtils';
-import { calculateSubscriptionExpiry, formatDate } from '../../utils/dateUtils';
-import { saveDocumentBlob } from '../../utils/idbStorage';
+import { paymentReferenceError } from '../../utils/paymentReference';
+import { ReferenceField } from '../ReferenceField';
+import { periodEndDate, validatePaidOn } from '../../utils/dateUtils';
+import { effectiveCycleConfig, firstAdmissionCharge, addDays } from '../../utils/billingCycle';
+import { saveDocumentBlobNow, deleteDocumentBlob, getDocumentBlob } from '../../utils/idbStorage';
+import { api } from '../../utils/api';
+import { uploadAttachmentFile, makeAttachmentKey } from '../../utils/attachmentUpload';
+import { PaymentProofFields } from '../PaymentProofFields';
+import { paymentProofModeOf, paymentProofsMissing, PAYMENT_PROOF_REQUIRED_MESSAGE } from '../../utils/paymentProof';
+import { allDocumentFiles, addFilesToDocuments, removeDocumentFile } from '../../utils/studentDocuments';
+
+const formatFileSize = (bytes) => {
+  const size = Number(bytes);
+  if (!Number.isFinite(size) || size < 0) return '';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+};
+
 import { getCanonicalShifts, isShiftInPlan } from '../../utils/shiftUtils';
+import { clientCanEditAmount } from '../../utils/amountPermission';
 import { getCanonicalSeatTypes, areSeatTypesEquivalent } from '../../utils/seatTypeUtils';
 
-export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPayload }) => {
+export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPayload, onAdmitted }) => {
   const { 
     settings, branches, sections, plans, shifts, seatTypes, addStudent, students, archivedStudents, 
-    todayStr, getAvailableEligibleSeats, canAdmitStudent, addToWaitingList, getMatchingPlans, getUnsyncedShifts, getUnsyncedPlans
+    todayStr, getAvailableEligibleSeats, canAdmitStudent, addToWaitingList, getMatchingPlans, getUnsyncedShifts, getUnsyncedPlans,
+    currentStaff, lockedStaffId
   } = useLibrary();
+  const canEditAmount = clientCanEditAmount({ lockedStaffId, currentStaff, settings });
+  const proofMode = paymentProofModeOf(settings);
+  const [proofRequiredError, setProofRequiredError] = useState(false);
 
   const libId = settings.libraryId;
 
@@ -30,43 +53,93 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
 
   // Document Requirement State
   const [selectedDocType, setSelectedDocType] = useState(settings.allowedDocuments?.[0] || 'Aadhaar Card');
-  const [docFileAttached, setDocFileAttached] = useState(false);
-  const [docFileMeta, setDocFileMeta] = useState(null);
+  // Issue #3: one group per document type, each with an additive files[] list.
+  const [docGroups, setDocGroups] = useState([]);
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [submitDocLater, setSubmitDocLater] = useState(false);
+  const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+  const lastSourceRef = useRef('upload'); // which picker was used, for Retake
+  const [previewUrls, setPreviewUrls] = useState({});
+  const [previewDoc, setPreviewDoc] = useState(null);
+  const [isDocPreviewOpen, setIsDocPreviewOpen] = useState(false);
+  const docFiles = useMemo(() => allDocumentFiles(docGroups), [docGroups]);
+  const docFileAttached = docFiles.length > 0;
 
-  const handleFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const selectedDocTypeObj = settings.documentTypes?.find(d => d.name === selectedDocType);
+  const effectiveDocRequirement = selectedDocTypeObj?.requirement || settings.idProofRequirement || 'Required';
+  const canSkipDocument = effectiveDocRequirement === 'Can Be Submitted Later';
+
+  const resetFileInput = () => {
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (cameraInputRef.current) cameraInputRef.current.value = '';
+  };
+
+  const handleFileChange = async (e) => {
+    const files = Array.from(e.target.files || []);
+    lastSourceRef.current = e.target === cameraInputRef.current ? 'camera' : 'upload';
+    resetFileInput();
+
+    // Cancelling the picker (or selecting nothing) must never mark a document as attached.
+    if (!files.length) return;
+
     setIsUploadingDoc(true);
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
+    setUploadProgress(0);
+    const added = [];
+    const urls = {};
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const storageKey = makeAttachmentKey('doc', `${libId}_${selectedDocType}_${Date.now()}_${i}_${Math.random()}`);
       try {
-        const base64Data = ev.target.result;
-        const storageKey = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-        await saveDocumentBlob(storageKey, base64Data);
-        setDocFileMeta({
-          id: storageKey,
-          name: selectedDocType,
-          fileName: file.name,
-          fileType: file.type,
-          storageKey,
-          uploadedAt: new Date().toISOString()
+        const meta = await uploadAttachmentFile({
+          file,
+          key: storageKey,
+          returnDataUrl: true,
+          docType: selectedDocType,
+          onProgress: (p) => setUploadProgress(Math.round(((i + p / 100) / files.length) * 100)),
+          save: (key, data, encoded) => saveDocumentBlobNow(key, data, {
+            docTypeId: selectedDocType,
+            fileName: file.name,
+            fileType: encoded?.fileType || file.type,
+            fileSize: encoded?.fileSize ?? file.size,
+            status: 'Submitted',
+          }),
         });
-        setDocFileAttached(true);
-        toast.success(`Attached ${file.name}`);
+        added.push({ ...meta, name: selectedDocType, docTypeId: selectedDocType, status: 'Submitted' });
+        if (meta.dataUrl) urls[meta.id] = meta.dataUrl;
+        delete meta.dataUrl;
       } catch (err) {
-        console.error('IDB document save failed:', err);
-        toast.error('Failed to attach document.');
-      } finally {
-        setIsUploadingDoc(false);
+        toast.error(err?.message || `Could not attach ${file.name}.`);
       }
-    };
-    reader.onerror = () => {
-      setIsUploadingDoc(false);
-      toast.error('Could not read file.');
-    };
-    reader.readAsDataURL(file);
+    }
+    if (added.length) {
+      setDocGroups(prev => addFilesToDocuments(prev, { name: selectedDocType, docTypeId: selectedDocType, files: added }));
+      setPreviewUrls(prev => ({ ...prev, ...urls }));
+      setSubmitDocLater(false);
+      toast.success(added.length === 1 ? `Attached ${added[0].fileName}` : `Attached ${added.length} files`);
+    }
+    setIsUploadingDoc(false);
+    setUploadProgress(0);
+  };
+
+  const handleRemoveDoc = (docKey, fileId) => {
+    setDocGroups(prev => removeDocumentFile(prev, docKey, fileId));
+    setPreviewUrls(prev => { const next = { ...prev }; delete next[fileId]; return next; });
+    if (previewDoc?.id === fileId) { setIsDocPreviewOpen(false); setPreviewDoc(null); }
+    if (fileId) deleteDocumentBlob(fileId).catch(() => {});
+  };
+
+  const openDocPreview = async (file, docTypeId) => {
+    let url = previewUrls[file.id];
+    if (!url) {
+      const stored = await getDocumentBlob(file.storageKey);
+      url = typeof stored === 'string' ? stored : (stored ? URL.createObjectURL(stored) : null);
+      if (url) setPreviewUrls(prev => ({ ...prev, [file.id]: url }));
+    }
+    if (!url) { toast.error('Could not load this preview. Re-attach the file if needed.'); return; }
+    setPreviewDoc({ ...file, docTypeId: docTypeId || file.docTypeId, url });
+    setIsDocPreviewOpen(true);
   };
 
   // Hierarchy Selection
@@ -80,12 +153,20 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
   const [isManualDuration, setIsManualDuration] = useState(false);
 
   // Transaction-Level Pricing & Discount Overrides
-  const [baseAmount, setBaseAmount] = useState(0);
+  const [baseAmount, setBaseAmountRaw] = useState(0);
+  // Issue #9: remember the system amount so a manual change can be flagged (server checks permission + audits).
+  const [suggestedBase, setSuggestedBase] = useState(0);
+  const [proRateApplied, setProRateApplied] = useState(null);
+  const setBaseAmount = (v) => { setBaseAmountRaw(v); setSuggestedBase(v); setProRateApplied(null); };
   const [discountType, setDiscountType] = useState('None'); // 'None' | 'Percentage' | 'Fixed'
   const [discountValue, setDiscountValue] = useState(0);
   const [fine, setFine] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('');
+  const [paymentProofs, setPaymentProofs] = useState([]);
+  const [referenceNo, setReferenceNo] = useState('');
   const [splitBreakdown, setSplitBreakdown] = useState([{ method: '', amount: '' }]);
+  const [paidOn, setPaidOn] = useState(todayStr);
+  const [joiningDate, setJoiningDate] = useState(todayStr);
 
   // Error & Status State
   const [errors, setErrors] = useState({});
@@ -146,8 +227,11 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
   useEffect(() => {
     if (isOpen) {
       setName(''); setPhone(''); setEmergencyPhone(''); setGender('Male');
-      setInternalNotes(''); setSubmitError(''); setIsCapacityFull(false);
-      setDocFileAttached(false); setSubmitDocLater(false);
+      setInternalNotes(waitlistPayload?.email ? `Enquiry email: ${waitlistPayload.email}` : '');
+      setSubmitError(''); setIsCapacityFull(false);
+      setDocGroups([]); setPreviewUrls({}); setPreviewDoc(null); setIsDocPreviewOpen(false);
+      setIsUploadingDoc(false); setUploadProgress(0); setSubmitDocLater(false);
+      resetFileInput();
       
       const defaultB = branches[0]?.id || '';
       const defaultS = sections.find(s => !defaultB || s.branchId === defaultB)?.id || '';
@@ -169,9 +253,13 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
         setPlanId('');
         setShiftId('');
         setPaymentMethod('');
+        setReferenceNo('');
         setSplitBreakdown([{ method: '', amount: '' }]);
+        setPaidOn(todayStr);
+        setJoiningDate(todayStr);
       }
       setDurationMonths(1); setIsManualDuration(false); setDiscountType('None'); setDiscountValue(0); setFine(0);
+      setPaidOn(todayStr); setJoiningDate(todayStr);
     }
   }, [isOpen, waitlistPayload]);
 
@@ -327,6 +415,10 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
     const parsedDur = Number(durationMonths);
     if (!parsedDur || parsedDur < 1) errs.durationMonths = "Valid Subscription Duration (>= 1) is required.";
     if (isFixed && !seatNo) errs.seatNo = "Physical seat allocation is required for Fixed desks.";
+    const paidOnError = validatePaidOn(paidOn, todayStr);
+    if (paidOnError) errs.paidOn = paidOnError;
+    if (!joiningDate) errs.joiningDate = "Enter the period start date.";
+    else if (joiningDate > todayStr) errs.joiningDate = "Period start cannot be in the future.";
     if (!paymentMethod) errs.paymentMethod = "Please select a payment method.";
     if (paymentMethod === 'Split') {
       const splitCheck = validateSplitPayment(splitBreakdown, netPayable);
@@ -334,16 +426,23 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
         errs.splitAmount = splitCheck.error;
       }
     }
+    const referenceErr = paymentReferenceError({
+      method: paymentMethod,
+      referenceNo,
+      breakdown: paymentMethod === 'Split' ? splitBreakdown : undefined,
+    });
+    if (referenceErr) errs.referenceNo = referenceErr;
 
     // Document requirement validation
-    const currentDocTypeObj = settings.documentTypes?.find(d => d.name === selectedDocType);
-    const effectiveRequirement = currentDocTypeObj ? currentDocTypeObj.requirement : (settings.idProofRequirement || 'Required');
-
-    if (effectiveRequirement === 'Required' && !docFileAttached && !submitDocLater) {
+    if (effectiveDocRequirement === 'Required' && !docFileAttached && !submitDocLater) {
       errs.document = `Admission document (${selectedDocType}) is required.`;
+    }
+    if (paymentProofsMissing(proofMode, paymentProofs)) {
+      errs.paymentProofs = PAYMENT_PROOF_REQUIRED_MESSAGE;
     }
 
     setErrors(errs);
+    setProofRequiredError(!!errs.paymentProofs);
     return Object.keys(errs).length === 0;
   };
 
@@ -367,7 +466,7 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
     onClose();
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
 
@@ -376,13 +475,37 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
       return;
     }
 
-    const todayFormatted = formatDate(new Date());
-    const calculatedExpiry = calculateSubscriptionExpiry(todayFormatted, durationMonths || 1);
+    const todayFormatted = joiningDate || todayStr;
+    const anchorDay = Number(String(todayFormatted).slice(8, 10)) || undefined;
+    const admissionPlan = plans.find(p => p.id === planId);
+    const admissionCycle = effectiveCycleConfig(settings, admissionPlan);
+    // Plans with no duration type keep the previous month-based expiry. Pro-rate still follows the library cycle.
+    let calculatedExpiry = admissionPlan?.billingCycle?.mode
+      ? periodEndDate(todayFormatted, durationMonths || 1, { anchorDay, cycle: admissionCycle })
+      : periodEndDate(todayFormatted, durationMonths || 1, { anchorDay });
+    let proRatedPayload = null;
+    if (proRateApplied) {
+      const unit = Number(suggestedBase) / Math.max(1, Number(durationMonths) || 1);
+      const pr = firstAdmissionCharge(unit, todayFormatted, admissionCycle);
+      calculatedExpiry = pr.to;
+      proRatedPayload = { ...pr, fullFee: Number(suggestedBase) };
+    }
 
-    const docRecord = docFileMeta || (docFileAttached ? {
-      name: selectedDocType,
-      uploadedAt: new Date().toISOString()
-    } : null);
+    const docRecords = docGroups.map((group) => {
+      const files = (group.files || []).map(({ dataUrl: _u, ...f }) => ({ ...f, name: group.name, docTypeId: group.docTypeId }));
+      const first = files[0] || {};
+      return {
+        name: group.name,
+        docTypeId: group.docTypeId,
+        files,
+        storageKey: first.storageKey || null,
+        fileName: first.fileName || null,
+        fileType: first.fileType || '',
+        fileSize: first.fileSize ?? null,
+        uploadedAt: first.uploadedAt || new Date().toISOString(),
+        status: first.status || 'Submitted',
+      };
+    });
 
     const studentData = {
       name: name.trim(),
@@ -397,20 +520,35 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
       shift: shifts.find(s => s.id === shiftId)?.name || 'Full Day',
       seatNo: isFixed ? seatNo : 'Non-Fixed Seat',
       durationMonths: Number(durationMonths),
-      amountPaid: Number(baseAmount),
+      amountPaid: proRatedPayload ? proRatedPayload.amount : Number(baseAmount),
+      suggestedAmount: proRatedPayload ? proRatedPayload.amount : Number(suggestedBase),
+      ...(!proRatedPayload && Number(baseAmount) !== Number(suggestedBase) ? { amountEdited: true } : {}),
+      ...(proRatedPayload ? { proRated: proRatedPayload } : {}),
+      paidOn,
       discount: calculatedDiscount,
       fine: Number(fine),
       paymentMethod,
+      referenceNo,
+      paymentProofs,
       breakdown: paymentMethod === 'Split' ? splitBreakdown : undefined,
       internalNotes,
-      documents: docRecord ? [docRecord] : [],
-      idProofStatus: submitDocLater ? 'Pending' : (docRecord ? 'Verified' : 'Not Required'),
+      documents: docRecords,
+      idProofStatus: submitDocLater ? 'Pending' : (docRecords.length ? 'Verified' : 'Not Required'),
       startDate: todayFormatted,
       expiryDate: calculatedExpiry
     };
 
     const res = addStudent(studentData);
     if (res && res.student) {
+      // Claim the already-uploaded files for this student so a student-scoped fetch can verify ownership.
+      await Promise.all(docFiles.map((f) => api.updateDocumentMeta(f.storageKey, { studentId: res.student.id }).catch(() => {})));
+      if (waitlistPayload?.enquiryId && onAdmitted) {
+        try {
+          await onAdmitted(waitlistPayload.enquiryId);
+        } catch (err) {
+          toast.error(err?.message || 'Admission saved, but the enquiry is still on the waiting list.');
+        }
+      }
       toast.success('Student admission completed successfully!');
       if (onPrintReceipt && res.receipt) {
         onPrintReceipt(res.receipt);
@@ -485,6 +623,7 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
                   <label className="form-label" style={{ fontSize: '12px' }}>Phone Number *</label>
                   <input type="tel" maxLength={10} className={`form-input ${errors.phone ? 'error' : ''}`} placeholder="10 Digits" value={phone} onChange={e => setPhone(e.target.value)} />
                   {errors.phone && <span style={{ color: '#ef4444', fontSize: '11px' }}>{errors.phone}</span>}
+                  {waitlistPayload?.email && <span style={{ color: 'var(--text-secondary)', fontSize: '11px' }}>Email: {waitlistPayload.email}</span>}
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label" style={{ fontSize: '12px' }}>Emergency Phone</label>
@@ -494,10 +633,10 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
 
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label" style={{ fontSize: '12px' }}>Gender *</label>
-                <div style={{ display: 'flex', gap: '16px' }}>
+                <div className="radio-group" role="radiogroup" aria-label="Gender">
                   {['Male', 'Female', 'Other'].map(g => (
-                    <label key={g} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
-                      <input type="radio" name="gnd" checked={gender === g} onChange={() => setGender(g)} />
+                    <label key={g}>
+                      <input type="radio" name="gnd" value={g} checked={gender === g} onChange={() => setGender(g)} />
                       <span>{g}</span>
                     </label>
                   ))}
@@ -509,30 +648,102 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                   <span style={{ fontSize: '12px', fontWeight: 600 }}>ID Document Verification</span>
                   <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px' }}>
-                    {settings.documentTypes?.find(d => d.name === selectedDocType)?.requirement || settings.idProofRequirement || 'Required'}
+                    {effectiveDocRequirement}
                   </span>
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <select className="form-select" style={{ fontSize: '12px' }} value={selectedDocType} onChange={e => setSelectedDocType(e.target.value)}>
+                  <select className="form-select" style={{ fontSize: '12px', flex: 1 }} value={selectedDocType} onChange={e => setSelectedDocType(e.target.value)}>
                     {(settings.allowedDocuments || ["Aadhaar Card", "Student ID", "Address Proof"]).map(d => (
                       <option key={d} value={d}>{d}</option>
                     ))}
                   </select>
 
-                  <label className="btn btn-ghost" style={{ fontSize: '12px', border: '1px solid var(--border-light)', cursor: 'pointer', margin: 0, opacity: isUploadingDoc ? 0.6 : 1 }}>
-                    {isUploadingDoc ? 'Attaching...' : (docFileAttached ? '✓ Attached' : 'Attach')}
-                    <input type="file" style={{ display: 'none' }} accept="image/*,.pdf" onChange={handleFileChange} disabled={isUploadingDoc} />
-                  </label>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ fontSize: '12px', border: '1px solid var(--border-light)', cursor: isUploadingDoc ? 'not-allowed' : 'pointer', opacity: isUploadingDoc ? 0.6 : 1, flexShrink: 0 }}
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploadingDoc}
+                  >
+                    {isUploadingDoc ? 'Attaching...' : (docFileAttached ? 'Replace' : 'Attach')}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ fontSize: '12px', border: '1px solid var(--border-light)', cursor: isUploadingDoc ? 'not-allowed' : 'pointer', opacity: isUploadingDoc ? 0.6 : 1, flexShrink: 0 }}
+                    onClick={() => cameraInputRef.current?.click()}
+                    disabled={isUploadingDoc}
+                    aria-label="Take photo with camera"
+                  >
+                    Camera
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    style={{ display: 'none' }}
+                    accept="image/*,.pdf"
+                    onChange={handleFileChange}
+                    disabled={isUploadingDoc}
+                  />
+                  <input
+                    ref={cameraInputRef}
+                    type="file"
+                    style={{ display: 'none' }}
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleFileChange}
+                    disabled={isUploadingDoc}
+                    data-testid="doc-camera-input"
+                  />
                 </div>
 
-                {(settings.documentTypes?.find(d => d.name === selectedDocType)?.requirement === 'Can Be Submitted Later' || settings.idProofRequirement === 'Can Be Submitted Later') && (
+                {isUploadingDoc && (
+                  <div style={{ marginTop: '8px' }}>
+                    <div style={{ height: 4, background: '#e2e8f0', borderRadius: 999, overflow: 'hidden' }}>
+                      <div style={{ width: `${uploadProgress}%`, height: '100%', background: '#2563eb', transition: 'width .2s ease' }} />
+                    </div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Uploading… {uploadProgress}%</span>
+                  </div>
+                )}
+
+                {!docFileAttached && !isUploadingDoc && (
+                  <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '8px' }}>No file selected</span>
+                )}
+
+                {docGroups.map((group) => (
+                  <div key={group.docTypeId || group.name} style={{ marginTop: '10px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>{group.name} <span style={{ fontWeight: 400 }}>({group.files.length})</span></div>
+                    {group.files.map((file) => (
+                      <div key={file.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 0', borderTop: '1px dashed var(--border-light)' }}>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: '11px', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.fileName}>
+                          {file.fileName}{file.fileSize ? ` (${formatFileSize(file.fileSize)})` : ''}
+                        </span>
+                        <button type="button" className="btn btn-ghost" style={{ fontSize: '11px', padding: '2px 8px' }} onClick={() => openDocPreview(file, group.docTypeId || group.name)}>Preview</button>
+                        <button type="button" className="btn btn-ghost" style={{ fontSize: '11px', padding: '2px 8px', color: 'var(--status-error)' }} onClick={() => handleRemoveDoc(group.docTypeId || group.name, file.id)}>Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+
+                {canSkipDocument && !docFileAttached && (
                   <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', marginTop: '8px', cursor: 'pointer', color: 'var(--text-secondary)' }}>
                     <input type="checkbox" checked={submitDocLater} onChange={e => setSubmitDocLater(e.target.checked)} />
-                    <span>Submit Later (Mark Document Pending)</span>
+                    <span>Skip for now (mark document pending)</span>
                   </label>
                 )}
                 {errors.document && <span style={{ color: '#ef4444', fontSize: '11px', display: 'block', marginTop: '4px' }}>{errors.document}</span>}
+                {isDocPreviewOpen && previewDoc && (
+                  <DocPreview
+                    src={previewDoc.url}
+                    name={`${previewDoc.docTypeId || selectedDocType}: ${previewDoc.fileName}`}
+                    fileType={previewDoc.fileType}
+                    onClose={() => setIsDocPreviewOpen(false)}
+                    onRemove={() => handleRemoveDoc(previewDoc.docTypeId, previewDoc.id)}
+                    onRetake={() => { setIsDocPreviewOpen(false); (lastSourceRef.current === 'camera' ? cameraInputRef : fileInputRef).current?.click(); }}
+                  />
+                )}
               </div>
 
               <div className="form-group" style={{ marginBottom: 0 }}>
@@ -679,7 +890,7 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
                   <label className="form-label" style={{ fontSize: '12px' }}>Subscription Duration</label>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <label htmlFor="duration-months-input" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                      Months:
+                      {durationUnitWord(planPricingUnit(plans.find(p => p.id === planId)))}:
                     </label>
                     <input
                       id="duration-months-input"
@@ -741,11 +952,29 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
                     <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>FEE & DISCOUNT</span>
                     <span style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>Overrides apply to this admission only</span>
                   </div>
+                  {(() => {
+                    const selected = plans.find(p => p.id === planId);
+                    const cfg = effectiveCycleConfig(settings, selected);
+                    if (cfg.mode === 'ANNIVERSARY' || !selected || Number(durationMonths) !== 1) return null;
+                    const unit = Number(suggestedBase) / Math.max(1, Number(durationMonths) || 1);
+                    const pr = firstAdmissionCharge(unit, joiningDate || todayStr, cfg);
+                    if (!pr.prorated) return null;
+                    return (
+                      <div data-testid="prorate-box" style={{ fontSize: '12px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', padding: '8px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span>{selected.billingCycle?.mode ? 'This plan' : 'Library cycle'}: first payment ₹{pr.amount.toLocaleString()} for {pr.days} of {pr.totalDays} days (to {pr.to}). Then full fee.</span>
+                        {proRateApplied ? (
+                          <button type="button" className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => setBaseAmount(Number(suggestedBase))}>Use full fee</button>
+                        ) : (
+                          <button type="button" className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => { setBaseAmountRaw(pr.amount); setProRateApplied({ ...pr, fullFee: Number(suggestedBase) }); }}>Use pro-rated</button>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                     <div>
                       <label className="form-label" style={{ fontSize: '11px' }}>Base Price (₹)</label>
-                      <NumericInput className="form-input" value={baseAmount} onChange={e => setBaseAmount(Number(e.target.value))} />
+                      <NumericInput className="form-input" value={baseAmount} readOnly={!canEditAmount} title={canEditAmount ? undefined : 'You do not have permission to change amounts'} onChange={e => canEditAmount && setBaseAmountRaw(Number(e.target.value))} />
                     </div>
 
                     <div>
@@ -781,6 +1010,25 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
                 </div>
               )}
 
+              {!isCapacityFull && planId && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '12px' }}>Period start / joining date</label>
+                    <input type="date" className="form-input" value={joiningDate} max={todayStr} onChange={(e) => {
+                      setJoiningDate(e.target.value);
+                      if (proRateApplied) setBaseAmount(Number(suggestedBase));
+                    }} />
+                    {errors.joiningDate && <span style={{ color: '#ef4444', fontSize: '11px', display: 'block', marginTop: '4px' }}>{errors.joiningDate}</span>}
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '12px' }}>Payment date</label>
+                    <input type="date" className="form-input" value={paidOn} max={todayStr} min={addDays(todayStr, -60)} onChange={(e) => setPaidOn(e.target.value)} />
+                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>The day the fee was paid. It can differ from the period start.</span>
+                    {errors.paidOn && <span style={{ color: '#ef4444', fontSize: '11px', display: 'block', marginTop: '4px' }}>{errors.paidOn}</span>}
+                  </div>
+                </div>
+              )}
+
               {/* Payment Method Selector */}
               {!isCapacityFull && planId && (
                 <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '16px' }}>
@@ -805,10 +1053,14 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
                       <option value="Cash">Cash</option>
                       <option value="Card">Debit / Credit Card</option>
                       <option value="Bank Transfer">Bank Transfer</option>
+                      <option value="Net Banking">Net banking</option>
+                      <option value="Cheque">Cheque</option>
                       <option value="Split">Split Payment</option>
                     </select>
                     {errors.paymentMethod && <div className="form-error" style={{ color: 'red', fontSize: '11px', marginTop: '4px' }}>{errors.paymentMethod}</div>}
                   </div>
+                  <ReferenceField mode={paymentMethod} value={referenceNo} onChange={setReferenceNo} error={errors.referenceNo} />
+                  <PaymentProofFields value={paymentProofs} onChange={setPaymentProofs} mode={proofMode} showRequiredError={proofRequiredError} />
 
                   {paymentMethod === 'Split' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
@@ -828,8 +1080,10 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
                             <option value="UPI">UPI / QR Code</option>
                             <option value="Cash">Cash</option>
                             <option value="Card">Debit / Credit Card</option>
-                            <option value="Bank Transfer">Bank Transfer</option>
-                          </select>
+                              <option value="Bank Transfer">Bank Transfer</option>
+                              <option value="Net Banking">Net banking</option>
+                              <option value="Cheque">Cheque</option>
+                            </select>
                           <NumericInput
                             className="form-input"
                             value={item.amount}
@@ -848,6 +1102,17 @@ export const NewStudentModal = ({ isOpen, onClose, onPrintReceipt, waitlistPaylo
                           >
                             <X size={16} />
                           </button>
+                          <ReferenceField
+                            compact
+                            mode={item.method}
+                            value={item.referenceNo}
+                            error={errors.referenceNo}
+                            onChange={(value) => {
+                              const newB = [...splitBreakdown];
+                              newB[idx] = { ...newB[idx], referenceNo: value };
+                              setSplitBreakdown(newB);
+                            }}
+                          />
                         </div>
                       ))}
                       <button

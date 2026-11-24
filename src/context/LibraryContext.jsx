@@ -1,9 +1,22 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { api, createSyncQueue, SYNCED_COLLECTIONS } from '../utils/api';
-import { getDefaultPermissionsForRole, syncLegacyPermissions } from '../utils/staffPermissions';
+import { isSubscriptionLockError } from '../utils/subscriptionLock';
+import { api, createSyncQueue, LOCKED_CONFIG_COLLECTIONS, SYNCED_COLLECTIONS } from '../utils/api';
+import { getDefaultPermissionsForRole, syncLegacyPermissions, staffAllows, sanitizeStaffPermissions } from '../utils/staffPermissions';
 import { isShiftInPlan, resolveCanonicalShift, getCanonicalShifts, normalizeShiftName, shiftsOverlap } from '../utils/shiftUtils';
 import { areSeatTypesEquivalent } from '../utils/seatTypeUtils';
+import { buildAdmissionVoid } from '../utils/admissionVoid.js';
+import { buildRenewalVoid, markPaymentVoided } from '../utils/paymentVoid.js';
+import { todayIST, validatePaidOn, applyRenewalToStudent, formatDate } from '../utils/dateUtils';
+import { periodSnapshots, holdsDesk, NEW_LIBRARY_GRACE_DAYS, DEFAULT_EXPIRED_PERIOD_DAYS } from '../utils/subscriptionLifecycle.js';
+import { stampPaymentReference } from '../utils/paymentReference';
+import { collectorIdentity } from '../utils/paymentCollector';
+import { paymentProofRefs, paymentProofModeOf, paymentProofsMissing, PAYMENT_PROOF_REQUIRED_MESSAGE } from '../utils/paymentProof';
+import { useAuth } from '../auth/AuthContext';
+import { scopedStorage, canSeedServer } from '../utils/tenantCache';
+// Issue #2: all cache reads/writes in this file go to the current library's own namespace.
+const localStorage = scopedStorage;
+
 
 const LibraryContext = createContext();
 
@@ -18,7 +31,10 @@ const INITIAL_SETTINGS = {
   upiId: "",
   upiQrUrl: "",
   receiptFooter: "Thank you for choosing our Library!",
+  // Unset (not "") so new and existing libraries get the shipped default until the owner saves.
+  // receiptInstructions is omitted here on purpose.
   idProofRequirement: "Required", // 'Required' | 'Can Be Submitted Later' | 'Not Required'
+  paymentProofMode: "OPTIONAL", // OFF | OPTIONAL | REQUIRED
   allowedDocuments: ["Aadhaar Card", "Student ID", "Address Proof", "Photograph"],
   documentTypes: [
     { id: "doc-aadhaar", name: "Aadhaar Card", requirement: "Required", active: true },
@@ -28,7 +44,8 @@ const INITIAL_SETTINGS = {
     { id: "doc-other", name: "Other Document", requirement: "Not Required", active: true }
   ],
   idProofDeadlineDays: 7,
-  gracePeriodDays: 3,
+  gracePeriodDays: NEW_LIBRARY_GRACE_DAYS,
+  expiredPeriodDays: DEFAULT_EXPIRED_PERIOD_DAYS,
   billingMode: "Anniversary", // 'Anniversary' | 'CalendarMonth'
   calendarBillingDay: 1,
   isSetupComplete: false,
@@ -102,8 +119,6 @@ const INITIAL_STAFF = [
     permissions: getDefaultPermissionsForRole('Admin')
   }
 ];
-
-const todayStr = new Date().toISOString().split('T')[0];
 
 const INITIAL_STUDENTS = [];
 const INITIAL_EXPENSES = [];
@@ -357,7 +372,7 @@ export const reconcileSeats = ({ savedSeats, students = [], sections = [], branc
   // Track physically occupied seat names to ensure we never drop a seat that an active student is sitting in
   const occupiedSeatNames = new Set();
   students.forEach(st => {
-    if ((st.status === 'Active' || st.status === 'Expiring Soon') && st.seatNo) {
+    if (holdsDesk(st, null, todayIST()) && st.seatNo) {
       occupiedSeatNames.add(st.seatNo);
     }
   });
@@ -437,7 +452,7 @@ export const reconcileSeats = ({ savedSeats, students = [], sections = [], branc
 
   // Ensure every active student with an allocated physical seat has that seat recovered in their branch/section
   students.forEach(st => {
-    if ((st.status === 'Active' || st.status === 'Expiring Soon') && st.seatNo && st.seatNo !== 'Non-Fixed Seat' && st.seatNo !== 'None') {
+    if (holdsDesk(st, null, todayIST()) && st.seatNo && st.seatNo !== 'Non-Fixed Seat' && st.seatNo !== 'None') {
       const targetBranch = st.branchId || defaultBranchId;
       const branchSecs = sections.filter(s => !s.branchId || s.branchId === 'all' || s.branchId === targetBranch);
       let targetSecId = st.sectionId;
@@ -481,7 +496,7 @@ export const reconcileSeats = ({ savedSeats, students = [], sections = [], branc
             const key = `${b.id}-${sec.id}-${sName}`;
             if (!seatMap[key]) {
               const isOccupiedElsewhere = students.some(st => 
-                (st.status === 'Active' || st.status === 'Expiring Soon') && 
+                holdsDesk(st, null, todayIST()) && 
                 st.seatNo === sName && 
                 st.branchId && st.branchId !== b.id
               );
@@ -518,6 +533,18 @@ export const reconcileSeats = ({ savedSeats, students = [], sections = [], branc
 };
 
 export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = null }) => {
+  const authUser = useAuth()?.user || null;
+  const todayStr = todayIST();
+  const paidStamp = (paidOn, period) => {
+    const paid = paidOn || todayStr;
+    return {
+      date: paid,
+      paidOn: paid,
+      enteredAt: new Date().toISOString(),
+      ...(period?.start ? { periodStart: period.start, startDate: period.start } : {}),
+      ...(period?.end ? { periodEnd: period.end, endDate: period.end } : {}),
+    };
+  };
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('library_settings');
     return saved ? JSON.parse(saved) : INITIAL_SETTINGS;
@@ -711,10 +738,19 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
   // localStorage stays as the reliable local cache; backend provides multi-device sync once online.
   const [backendStatus, setBackendStatus] = useState('connecting'); // 'connecting' | 'online' | 'offline'
   const syncRef = useRef(null);
+  const applyRemoteStateRef = useRef(null);
   if (!syncRef.current) {
     let warned = false;
     syncRef.current = createSyncQueue({
       onError: (key, e) => {
+        if (isSubscriptionLockError(e)) return;
+        // Server-side business rule (e.g. seat double booking): show the reason and
+        // reload the server's truth instead of keeping the rejected local change.
+        if (e.status === 409 || e.status === 400) {
+          toast.error(e.message || 'The server rejected this change.', { id: `sync-${key}` });
+          api.getState().then(remote => applyRemoteStateRef.current?.(remote)).catch(() => {});
+          return;
+        }
         console.warn(`[API] Failed to sync "${key}":`, e.message);
         setBackendStatus('offline');
         if (!warned) { warned = true; toast.error('Could not save to the server. Changes are kept locally.'); }
@@ -727,13 +763,93 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
     students, archivedStudents, expenses, payments, waitingList
   };
 
-  useEffect(() => {
-    let cancelled = false;
+  // Applies a backend snapshot to state without touching UI filters or form drafts.
+  const applyRemoteState = (remote) => {
+    const sync = syncRef.current;
     const setters = {
       branches: setBranches, sections: setSections, seatTypes: setSeatTypes, seats: setSeats,
       shifts: setShifts, plans: setPlans, staffMembers: setStaffMembers, students: setStudents,
       archivedStudents: setArchivedStudents, expenses: setExpenses, payments: setPayments, waitingList: setWaitingList
     };
+    sync.block([]);
+    if (remote.settings) { sync.markSynced('settings', remote.settings); setSettings(remote.settings); }
+    else sync.markLoaded('settings');
+    const hiddenMoney = new Set();
+    if (remote.financialAccess?.payments === false) hiddenMoney.add('payments');
+    if (remote.financialAccess?.expenses === false) hiddenMoney.add('expenses');
+    SYNCED_COLLECTIONS.forEach(c => {
+      if (hiddenMoney.has(c)) {
+        sync.markSynced(c, []);
+        setters[c]([]);
+        return;
+      }
+      const items = remote[c] || [];
+      // Keep the signed-in staff user when the server list is empty, but still allow later saves.
+      if (c === 'staffMembers' && items.length === 0) { sync.markLoaded(c); return; }
+      sync.markSynced(c, items);
+      setters[c](items);
+    });
+  };
+
+  applyRemoteStateRef.current = applyRemoteState;
+
+  // Plan is locked: GET /state is 402. Load only the config the server still serves,
+  // mark those keys synced, and only then enable sync. Anything not loaded (students,
+  // payments, seats, …) must not be pushed — the queue ignores unloaded and blocked keys.
+  const loadLockedSnapshot = async (isCurrent = () => true) => {
+    const sync = syncRef.current;
+    if (!sync) return;
+    sync.block(SYNCED_COLLECTIONS.filter(col => !LOCKED_CONFIG_COLLECTIONS.includes(col)));
+    const setters = {
+      branches: setBranches, sections: setSections, shifts: setShifts, seatTypes: setSeatTypes, plans: setPlans,
+    };
+    await Promise.all([
+      api.getSettings().then((doc) => {
+        if (!isCurrent() || !doc || typeof doc !== 'object') return;
+        sync.markSynced('settings', doc);
+        setSettings(doc);
+      }).catch(() => {}),
+      ...LOCKED_CONFIG_COLLECTIONS.map(col => api.getCollection(col).then((items) => {
+        if (!isCurrent() || !Array.isArray(items)) return;
+        sync.markSynced(col, items);
+        setters[col](items);
+      }).catch(() => {})),
+    ]);
+    if (!isCurrent() || readOnly) return;
+    sync.enable();
+  };
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Data-only refresh: re-fetches the backend snapshot (no page reload, filters preserved).
+  const refreshData = async () => {
+    setIsRefreshing(true);
+    try {
+      const remote = await api.getState();
+      const hasRemoteData = !!remote.settings || SYNCED_COLLECTIONS.some(c => (remote[c] || []).length > 0);
+      if (!hasRemoteData) {
+        setBackendStatus('online');
+        return false;
+      }
+      applyRemoteState(remote);
+      setBackendStatus('online');
+      syncRef.current?.enable();
+      return true;
+    } catch (e) {
+      if (isSubscriptionLockError(e)) {
+        await loadLockedSnapshot();
+        setBackendStatus('locked');
+        return 'locked';
+      }
+      setBackendStatus('offline');
+      throw e;
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
     const sync = syncRef.current;
     (async () => {
       try {
@@ -741,15 +857,26 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
         if (cancelled) return;
         const hasRemoteData = !!remote.settings || SYNCED_COLLECTIONS.some(c => (remote[c] || []).length > 0);
         if (hasRemoteData) {
-          if (remote.settings) { sync.markSynced('settings', remote.settings); setSettings(remote.settings); }
-          SYNCED_COLLECTIONS.forEach(c => {
-            const items = remote[c] || [];
-            if (c === 'staffMembers' && items.length === 0) return;
-            sync.markSynced(c, items);
-            setters[c](items);
-          });
+          // Server wins: load its data into state (and the localStorage cache via the effects above)
+          applyRemoteState(remote);
           if (!readOnly) sync.enable();
+        } else if (!readOnly && !canSeedServer()) {
+          // Issue #2: this browser's cache was not written by this library, so never upload it.
+          // An empty library starts clean, with its own setup wizard.
+          applyRemoteState({
+            settings: { ...INITIAL_SETTINGS, libraryId: remote.libraryId || INITIAL_SETTINGS.libraryId },
+            branches: INITIAL_BRANCHES, sections: INITIAL_SECTIONS, seatTypes: INITIAL_SEAT_TYPES, seats: INITIAL_SEATS,
+            shifts: INITIAL_SHIFTS, plans: INITIAL_PLANS, staffMembers: INITIAL_STAFF, students: INITIAL_STUDENTS,
+            archivedStudents: INITIAL_ARCHIVED_STUDENTS, expenses: INITIAL_EXPENSES, payments: INITIAL_PAYMENTS, waitingList: INITIAL_WAITING_LIST,
+          });
+          setStaffMembers(INITIAL_STAFF);
+          sync.enable();
         } else if (!readOnly) {
+          // Remote snapshot is empty, so this browser may upload its cache.
+          // The locked path never reaches here: GET /state is 402 and loadLockedSnapshot runs instead.
+          sync.block([]);
+          sync.markLoaded('settings');
+          SYNCED_COLLECTIONS.forEach(k => sync.markLoaded(k));
           sync.enable();
           const local = latestStateRef.current;
           const seededSettings = { ...local.settings, libraryId: remote.libraryId || local.settings.libraryId };
@@ -757,16 +884,36 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
           await Promise.all(SYNCED_COLLECTIONS.map(k => sync.push(k, local[k])));
           const fresh = await api.getState();
           if (cancelled) return;
-          if (fresh.settings) { sync.markSynced('settings', fresh.settings); setSettings(fresh.settings); }
-          SYNCED_COLLECTIONS.forEach(c => { const items = fresh[c] || []; if (c === 'staffMembers' && !items.length) return; sync.markSynced(c, items); setters[c](items); });
+          applyRemoteState(fresh);
         }
         setBackendStatus('online');
       } catch (e) {
         if (cancelled) return;
+        if (isSubscriptionLockError(e)) {
+          await loadLockedSnapshot(() => !cancelled);
+          if (!cancelled) setBackendStatus('locked');
+          return;
+        }
         setBackendStatus('offline');
       }
     })();
-    return () => { cancelled = true; };
+    const reload = async () => {
+      try {
+        const remote = await api.getState();
+        if (cancelled) return;
+        applyRemoteStateRef.current?.(remote);
+        setBackendStatus('online');
+        sync.enable();
+      } catch (e) {
+        if (cancelled) return;
+        if (isSubscriptionLockError(e)) {
+          await loadLockedSnapshot(() => !cancelled);
+          if (!cancelled) setBackendStatus('locked');
+        }
+      }
+    };
+    window.addEventListener('libos:reload-library', reload);
+    return () => { cancelled = true; window.removeEventListener('libos:reload-library', reload); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -817,6 +964,7 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
         libraryId: libId,
         migrationVersion: 4,
         idProofRequirement: prev.idProofRequirement || 'Required',
+        paymentProofMode: paymentProofModeOf(prev),
         allowedDocuments: prev.allowedDocuments || ["Aadhaar Card", "Student ID", "Address Proof", "Photograph"],
         documentTypes: prev.documentTypes && prev.documentTypes.length > 0 ? prev.documentTypes : [
           { id: "doc-aadhaar", name: "Aadhaar Card", requirement: "Required", active: true },
@@ -903,8 +1051,8 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       if (branchId && branchId !== 'all' && s.branchId && s.branchId !== 'all' && s.branchId !== branchId) continue;
       if (sectionId && sectionId !== 'all' && s.sectionId && s.sectionId !== sectionId) continue;
 
-      if (s.seatNo === seatName) {
-        if (s.status !== 'Active' && s.status !== 'Expiring Soon') continue;
+        if (s.seatNo === seatName) {
+        if (!holdsDesk(s, settings, todayStr)) continue;
 
         // Found active occupant of this physical seat
         if (!requestedShiftId) {
@@ -935,7 +1083,7 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
         const seatMatchesSec = s.seatNo && seats.some(st => (st.name || st.seatNumber) === s.seatNo && (!st.branchId || st.branchId === branchId) && (!st.sectionId || st.sectionId === sectionId));
         if (!studentSecMatches && !seatMatchesSec) return;
       }
-      if (s.status !== 'Active' && s.status !== 'Expiring Soon') return;
+      if (!holdsDesk(s, settings, todayStr)) return;
 
       const studentShift = resolveCanonicalShift(shifts, s.shiftId) || shifts.find(sh => sh.id === s.shiftId) || { id: s.shiftId, name: s.shift };
       const overlaps = reqShiftObj ? shiftsOverlap(studentShift, reqShiftObj) : true;
@@ -960,7 +1108,7 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
     const allStudents = [...students, ...transientStudents];
     return allStudents.filter(s => {
       if (libId && s.libraryId && s.libraryId !== libId) return false;
-      if (s.status !== 'Active' && s.status !== 'Expiring Soon') return false;
+      if (!holdsDesk(s, settings, todayStr)) return false;
       if (seatTypeId && s.seatTypeId !== seatTypeId) return false;
       if (branchId && branchId !== 'all' && s.branchId && s.branchId !== 'all' && s.branchId !== branchId) return false;
       if (sectionId && sectionId !== 'all' && s.sectionId && s.sectionId !== sectionId) return false;
@@ -1337,7 +1485,7 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
 
     // 3. Students exceeding non-fixed capacity
     students.forEach(s => {
-      if (s.status !== 'Active' && s.status !== 'Expiring Soon') return;
+      if (!holdsDesk(s, settings, todayStr)) return;
       const st = seatTypes.find(t => t.id === s.seatTypeId);
       if (st && st.allocationMode === 'Non-Fixed' && st.capacityMode === 'Limited') {
         const activeCount = getCurrentActiveAdmissions(libId, s.branchId, s.sectionId, s.seatTypeId, s.shiftId);
@@ -1413,6 +1561,41 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
   };
 
   // Add New Student
+  const feeCollector = () => collectorIdentity(authUser, {
+    staffRole: authUser?.role === 'staff' ? (currentStaff?.role || '') : '',
+  });
+  const withPaymentProofs = (source) => {
+    if (paymentProofModeOf(settings) === 'OFF') return {};
+    const proofs = paymentProofRefs(source?.paymentProofs);
+    return proofs.length ? { paymentProofs: proofs } : {};
+  };
+
+  const canManagePaymentProofs = !lockedStaffId;
+
+  const updatePaymentProofs = (receiptNo, proofs) => {
+    if (!receiptNo) return false;
+    if (!canManagePaymentProofs) {
+      toast.error('Only the library owner can change payment proof photos on a saved payment.');
+      return false;
+    }
+    const nextProofs = paymentProofRefs(proofs);
+    if (paymentProofsMissing(paymentProofModeOf(settings), nextProofs)) {
+      toast.error(PAYMENT_PROOF_REQUIRED_MESSAGE);
+      return false;
+    }
+    const payload = nextProofs;
+    setPayments(prev => prev.map(p => (p.receiptNo === receiptNo || p.id === receiptNo) ? { ...p, paymentProofs: payload } : p));
+    setStudents(prev => prev.map(s => {
+      const history = Array.isArray(s.paymentHistory) ? s.paymentHistory : [];
+      if (!history.some(p => p.receiptNo === receiptNo || p.id === receiptNo)) return s;
+      return {
+        ...s,
+        paymentHistory: history.map(p => (p.receiptNo === receiptNo || p.id === receiptNo) ? { ...p, paymentProofs: payload } : p),
+      };
+    }));
+    return true;
+  };
+
   const addStudent = (studentData) => {
     if (!hasPermission('students', 'create')) {
       toast.error('Permission Denied: You do not have permission to add students.');
@@ -1479,6 +1662,14 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       }
     }
 
+    const paidOn = studentData.paidOn || todayStr;
+    const paidOnError = validatePaidOn(paidOn, todayStr);
+    if (paidOnError) {
+      toast.error(paidOnError);
+      return { error: 'INVALID_DATE', message: paidOnError };
+    }
+    const paid = paidStamp(paidOn);
+
     const newRenewal = {
       renewalId: `RN-${Date.now()}`,
       planId: studentData.planId,
@@ -1493,8 +1684,8 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       discount,
       fine,
       receiptNo: newReceiptNo,
-      date: todayStr,
-      staffName: currentStaff?.name || "Admin"
+      ...paid,
+      staffName: feeCollector().staffName || currentStaff?.name || ''
     };
 
     const newSeatLog = {
@@ -1522,10 +1713,20 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       fine,
       netTotal,
       method: studentData.paymentMethod || "UPI",
+      referenceNo: studentData.referenceNo,
       breakdown: studentData.breakdown,
-      date: todayStr,
-      staffName: currentStaff?.name || "Admin"
+      planId: studentData.planId || plan?.id || null,
+      durationMonths: studentData.durationMonths || 1,
+      priceKind: 'admission',
+      suggestedAmount: studentData.suggestedAmount != null ? Number(studentData.suggestedAmount) : Number(amountPaid),
+      ...(studentData.amountEdited ? { amountEdited: true } : {}),
+      ...(studentData.proRated ? { proRated: studentData.proRated } : {}),
+      ...paidStamp(paidOn, { start: studentData.startDate, end: studentData.expiryDate }),
+      ...feeCollector(),
+      ...withPaymentProofs(studentData),
     };
+
+    const stampedPayment = stampPaymentReference(newPayment);
 
     const newStudentObj = {
       id: newStudentId,
@@ -1548,21 +1749,23 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       expiryDate: studentData.expiryDate,
       status: "Active",
       internalNotes: studentData.internalNotes || "",
-      joinedDate: todayStr,
-      renewalHistory: [newRenewal],
+      joinedDate: studentData.startDate || todayStr,
+      billingAnchorDay: Number(String(studentData.startDate || todayStr).slice(8, 10)) || undefined,
+      ...periodSnapshots(settings, studentData),
+      renewalHistory: [{ ...newRenewal, ...periodSnapshots(settings, studentData) }],
       seatHistory: [newSeatLog],
-      paymentHistory: [newPayment]
+      paymentHistory: [stampedPayment]
     };
 
     setStudents(prev => [newStudentObj, ...prev]);
-    setPayments(prev => [newPayment, ...prev]);
+    setPayments(prev => [stampedPayment, ...prev]);
 
     // Remove from waiting list if present
     if (studentData.waitlistEntryId) {
       removeFromWaitingList(studentData.waitlistEntryId);
     }
 
-    return { student: newStudentObj, receipt: newPayment };
+    return { student: newStudentObj, receipt: stampedPayment };
   };
 
   // Bulk Admission Processor
@@ -1570,10 +1773,14 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
     const accumulatedStudents = [];
     const accumulatedPayments = [];
     const accumulatedWaitlist = [];
-    const todayStr = new Date().toISOString().split('T')[0];
 
     for (let i = 0; i < bulkDataArray.length; i++) {
       const studentData = bulkDataArray[i];
+      const paidOnError = validatePaidOn(studentData.paidOn || todayStr, todayStr);
+      if (paidOnError) {
+        toast.error(paidOnError);
+        continue;
+      }
 
       // 1. Transactional Validation
       const check = canAdmitStudent(
@@ -1628,8 +1835,8 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
         discount: studentData.calculatedDiscount,
         fine: studentData.fine,
         receiptNo: newReceiptNo,
-        date: todayStr,
-        staffName: currentStaff?.name || "Admin"
+        ...paidStamp(studentData.paidOn || todayStr),
+        staffName: feeCollector().staffName || currentStaff?.name || ''
       };
 
       const newSeatLog = {
@@ -1641,7 +1848,7 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
         staffName: currentStaff?.name || "Admin"
       };
 
-      const newPayment = {
+      const newPayment = stampPaymentReference({
         receiptNo: newReceiptNo,
         studentId: newStudentId,
         studentName: studentData.name,
@@ -1653,10 +1860,12 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
         fine: studentData.fine,
         netTotal: studentData.netTotal,
         method: studentData.paymentMethod || "Cash",
+        referenceNo: studentData.referenceNo,
         breakdown: studentData.breakdown,
-        date: todayStr,
-        staffName: currentStaff?.name || "Admin"
-      };
+        ...paidStamp(studentData.paidOn || todayStr, { start: studentData.startDate, end: studentData.expiryDate }),
+        ...feeCollector(),
+        ...withPaymentProofs(studentData),
+      });
 
       const newStudentObj = {
         id: newStudentId,
@@ -1679,8 +1888,10 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
         expiryDate: studentData.expiryDate,
         status: "Active",
         internalNotes: "Bulk Admitted",
-        joinedDate: todayStr,
-        renewalHistory: [newRenewal],
+        joinedDate: studentData.startDate || todayStr,
+        billingAnchorDay: Number(String(studentData.startDate || todayStr).slice(8, 10)) || undefined,
+        ...periodSnapshots(settings, studentData),
+        renewalHistory: [{ ...newRenewal, ...periodSnapshots(settings, studentData) }],
         seatHistory: [newSeatLog],
         paymentHistory: [newPayment]
       };
@@ -1713,6 +1924,10 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
     const student = students.find(s => s.id === studentId);
     if (!student) return { error: 'NOT_FOUND', message: 'Student not found.' };
 
+    const paidOn = renewalData.paidOn || todayStr;
+    const paidOnError = validatePaidOn(paidOn, todayStr);
+    if (paidOnError) return { error: 'INVALID_DATE', message: paidOnError };
+
     const newReceiptNo = generateReceiptNo();
     const amountPaid = Number(renewalData.amountPaid || 0);
     const discount = Number(renewalData.discount || 0);
@@ -1733,13 +1948,13 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       discount,
       fine,
       receiptNo: newReceiptNo,
-      date: todayStr,
-      staffName: currentStaff?.name || "Admin",
+      ...paidStamp(paidOn),
+      staffName: feeCollector().staffName || currentStaff?.name || '',
       seatNo: student.seatNo
     };
 
     const targetBranch = branches.find(b => b.id === student.branchId);
-    const newPayment = {
+    const newPayment = stampPaymentReference({
       receiptNo: newReceiptNo,
       studentId: student.id,
       studentName: student.name,
@@ -1754,25 +1969,23 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       fine,
       netTotal,
       method: renewalData.paymentMethod || "UPI",
+      referenceNo: renewalData.referenceNo,
       breakdown: renewalData.breakdown,
-      date: todayStr,
-      staffName: currentStaff?.name || "Admin"
-    };
+      planId: renewalData.planId || student.planId || null,
+      durationMonths: Number(renewalData.durationMonths || 1),
+      priceKind: 'renewal',
+      suggestedAmount: renewalData.suggestedAmount != null ? Number(renewalData.suggestedAmount) : Number(amountPaid),
+      ...(renewalData.amountEdited ? { amountEdited: true } : {}),
+      ...(renewalData.bridge ? { bridge: renewalData.bridge } : {}),
+      ...paidStamp(paidOn, { start: renewalData.startDate, end: renewalData.expiryDate }),
+      ...feeCollector(),
+      ...withPaymentProofs(renewalData),
+    });
 
     setStudents(prev => prev.map(s => {
       if (s.id === studentId) {
-        return {
-          ...s,
-          planId: renewalData.planId || s.planId,
-          shiftId: renewalData.shiftId || s.shiftId,
-          shift: renewalData.shift || s.shift,
-          durationMonths: Number(renewalData.durationMonths || s.durationMonths || 1),
-          startDate: renewalData.startDate,
-          expiryDate: renewalData.expiryDate,
-          status: "Active",
-          renewalHistory: [newRenewal, ...s.renewalHistory],
-          paymentHistory: [newPayment, ...s.paymentHistory]
-        };
+        const snapshots = periodSnapshots(settings, s);
+        return applyRenewalToStudent(s, { ...newRenewal, ...snapshots }, newPayment, { billingAnchorDay: renewalData.billingAnchorDay, snapshots });
       }
       return s;
     }));
@@ -1817,7 +2030,7 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
   };
 
   // Change Student Seat (Full Scope & Shift-Overlap Relocation)
-  const changeSeat = (studentId, newSectionId, newSeatTypeId, newSeatNo, reason, newShiftId, newBranchId) => {
+  const changeSeat = (studentId, newSectionId, newSeatTypeId, newSeatNo, reason, newShiftId, newBranchId, priceChange = null) => {
     if (!hasPermission('students', 'edit')) {
       toast.error('Permission Denied: You do not have permission to change seats.');
       return false;
@@ -1884,13 +2097,53 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       newShift: reqShiftObj ? reqShiftObj.name : student.shift,
       reason: reason || "Relocation",
       date: todayStr,
-      staffName: currentStaff?.name || "Admin"
+      staffName: currentStaff?.name || "Admin",
+      // Issue #9: pro-rated fee difference for the rest of the paid period (+ charge, - credit).
+      ...(priceChange ? { priceChange } : {})
     };
+
+    // Issue #9: an upgrade charge is a separate receipt; a downgrade becomes credit on the student.
+    let upgradePayment = null;
+    const changeAmt = priceChange ? Number(priceChange.amount) || 0 : 0;
+    if (changeAmt > 0 && priceChange.collect) {
+      upgradePayment = stampPaymentReference({
+        receiptNo: generateReceiptNo(),
+        studentId: student.id,
+        studentName: student.name,
+        branchId,
+        branchName: newBranchObj?.name || settings.name || "Main Branch",
+        branchCode: newBranchObj?.code || "BR",
+        seatNo: newSeatNo,
+        seatName: newSeatNo,
+        planName: `Seat upgrade (${priceChange.days}/${priceChange.totalDays} days)`,
+        type: 'upgrade',
+        amount: changeAmt,
+        discount: 0,
+        fine: 0,
+        netTotal: changeAmt,
+        method: priceChange.method || "Cash",
+        referenceNo: priceChange.referenceNo,
+        priceKind: 'relocate',
+        oldFee: priceChange.oldFee ?? null,
+        newFee: priceChange.newFee ?? null,
+        moveDate: priceChange.moveDate ?? null,
+        paidUntil: priceChange.paidUntil ?? null,
+        totalDays: priceChange.totalDays ?? null,
+        suggestedAmount: priceChange.suggestedAmount != null ? Number(priceChange.suggestedAmount) : Number(priceChange.amount),
+        ...(priceChange.amountEdited ? { amountEdited: true } : {}),
+        date: todayStr,
+        ...feeCollector(),
+        ...withPaymentProofs(priceChange),
+      });
+      newSeatLog.receiptNo = upgradePayment.receiptNo;
+    }
 
     setStudents(prev => prev.map(s => {
       if (s.id === studentId) {
         return {
           ...s,
+          ...(changeAmt < 0 ? { creditBalance: (Number(s.creditBalance) || 0) + Math.abs(changeAmt) } : {}),
+          ...(upgradePayment ? { paymentHistory: [upgradePayment, ...(s.paymentHistory || [])] } : {}),
           branchId,
           sectionId,
           blockId: sectionId,
@@ -1903,20 +2156,22 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       }
       return s;
     }));
+    if (upgradePayment) setPayments(prev => [upgradePayment, ...prev]);
     return true;
   };
 
   // Add Expense
   const addExpense = (expenseData) => {
-    const newExpense = {
+    const newExpense = stampPaymentReference({
       id: `EXP-${Date.now()}`,
       branchId: expenseData.branchId,
       category: expenseData.category,
       amount: Number(expenseData.amount),
       date: expenseData.date || todayStr,
       mode: expenseData.mode || "Cash",
+      referenceNo: expenseData.referenceNo || "",
       notes: expenseData.notes || ""
-    };
+    });
     setExpenses(prev => [newExpense, ...prev]);
   };
 
@@ -1996,8 +2251,11 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
     setArchivedStudents(prev => prev.filter(s => s.id !== studentId));
   };
 
-  const permanentlyDeleteStudent = (studentId) => {
+  const permanentlyDeleteStudent = async (studentId) => {
+    // Server records an audited snapshot; payment records are kept.
+    try { await api.deleteArchivedStudent(studentId); } catch (e) { if (e?.status && e.status !== 404) { toast.error(e.message || 'Could not delete'); return false; } }
     setArchivedStudents(prev => prev.filter(s => s.id !== studentId));
+    return true;
   };
 
   const clearArchivedHistory = () => {
@@ -2007,31 +2265,8 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
   // Central Staff & Action Authorization Checker
   const hasPermission = (moduleName, actionName = 'view', staff = currentStaff) => {
     if (!staff) return false;
-    // Inactive staff members cannot perform any actions
     if (staff.status === 'Inactive') return false;
-    // Admins have full access
-    if (staff.role === 'Admin') return true;
-
-    const mod = staff.permissions?.[moduleName];
-    if (mod) {
-      if (mod.manage) return true;
-      if (typeof mod[actionName] === 'boolean') return mod[actionName];
-    }
-
-    // Fallbacks for legacy boolean flags only if mod is missing
-    if (!mod) {
-      if (moduleName === 'students' && actionName === 'edit') return Boolean(staff.permissions?.canManageStudents);
-      if (moduleName === 'students' && actionName === 'view') return true;
-      if (moduleName === 'payments' && actionName === 'create') return Boolean(staff.permissions?.canProcessPayments);
-      if (moduleName === 'seats' && actionName === 'edit') return Boolean(staff.permissions?.canEditSeats);
-      if (moduleName === 'expenses' && actionName === 'create') return Boolean(staff.permissions?.canManageExpenses);
-      if (moduleName === 'reports' && actionName === 'view') return Boolean(staff.permissions?.canViewFinancials);
-      if (moduleName === 'settings' && actionName === 'edit') return Boolean(staff.permissions?.canManageSettings);
-      if (moduleName === 'admissions' && actionName === 'delete') return Boolean(staff.permissions?.canCancelAdmission);
-      if (moduleName === 'payments' && actionName === 'approve') return Boolean(staff.permissions?.canProcessRefunds);
-    }
-
-    return false;
+    return staffAllows(staff.permissions, staff.role, moduleName, actionName);
   };
 
   const cancelAdmission = (studentId, reason, refundAmount = 0) => {
@@ -2060,7 +2295,7 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
         netTotal: -Math.abs(refundAmount),
         method: "Refund",
         date: todayStr,
-        staffName: currentStaff?.name || "Admin"
+        ...feeCollector(),
       };
       setPayments(prev => [newPayment, ...prev]);
     }
@@ -2081,45 +2316,45 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
     const renewalIndex = student.renewalHistory?.findIndex(r => r.renewalId === renewalId);
     if (renewalIndex === -1 || renewalIndex === undefined) return false;
 
-    const renewalToCancel = student.renewalHistory[renewalIndex];
-    const newRenewalHistory = student.renewalHistory.filter(r => r.renewalId !== renewalId);
-    const newPaymentHistory = student.paymentHistory.filter(p => p.receiptNo !== renewalToCancel.receiptNo);
+    const staffName = currentStaff?.name || 'Admin';
+    // Issue #11: voiding the initial admission ends the plan and frees the seat (record kept, audited).
+    const admissionVoid = buildAdmissionVoid(student, renewalId, { today: todayStr, staffName });
+    if (admissionVoid) {
+      setStudents(prev => prev.map(s => s.id === studentId ? { ...s, ...admissionVoid.updates } : s));
+      // Keep the payment row, marked Voided (no longer deleted).
+      setPayments(prev => prev.map(p => p.receiptNo === admissionVoid.receiptNo ? markPaymentVoided(p, { today: todayStr, staffName }) : p));
+      return 'admission';
+    }
 
-    let updates = {
-      renewalHistory: newRenewalHistory,
-      paymentHistory: newPaymentHistory
-    };
+    // Issue #11: renewal void keeps the record as Voided (no delete) and rolls dates back when it was the current period.
+    const renewalVoid = buildRenewalVoid(student, renewalId, { today: todayStr, staffName });
+    if (!renewalVoid) return false;
 
+    let updates = renewalVoid.updates;
     if (renewalIndex === 0) {
-      let newStartDate, newExpiryDate, newPlanId, newPlanName, newShift, newSeatNo;
-      if (newRenewalHistory.length > 0) {
-        newStartDate = newRenewalHistory[0].startDate;
-        newExpiryDate = newRenewalHistory[0].endDate;
-        newPlanId = newRenewalHistory[0].planId || student.planId;
-        newPlanName = newRenewalHistory[0].planName;
-        newShift = newRenewalHistory[0].shift || student.shift;
-        newSeatNo = newRenewalHistory[0].seatNo || student.seatNo;
+      const previous = (updates.renewalHistory || []).find(r => !r.voided);
+      if (previous) {
+        updates = {
+          ...updates,
+          startDate: previous.startDate,
+          expiryDate: previous.endDate,
+          planId: previous.planId || student.planId,
+          planName: previous.planName,
+          shift: previous.shift || student.shift,
+          seatNo: previous.seatNo || student.seatNo,
+        };
       } else {
-        newStartDate = student.joinedDate;
-        newExpiryDate = student.expiryDate;
-        newPlanId = student.planId;
-        newPlanName = student.planName;
-        newShift = student.shift;
-        newSeatNo = student.seatNo;
+        updates = {
+          ...updates,
+          startDate: student.joinedDate,
+          expiryDate: student.joinedDate,
+          status: 'Expired',
+        };
       }
-      updates = {
-        ...updates,
-        startDate: newStartDate,
-        expiryDate: newExpiryDate,
-        planId: newPlanId,
-        planName: newPlanName,
-        shift: newShift,
-        seatNo: newSeatNo
-      };
     }
 
     setStudents(prev => prev.map(s => s.id === studentId ? { ...s, ...updates } : s));
-    setPayments(prev => prev.filter(p => p.receiptNo !== renewalToCancel.receiptNo));
+    setPayments(prev => prev.map(p => p.receiptNo === renewalVoid.receiptNo ? markPaymentVoided(p, { today: todayStr, staffName }) : p));
     return true;
   };
 
@@ -2159,7 +2394,7 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
 
     const assignedRole = staffData.role || 'Librarian';
     const basePermissions = staffData.permissions || getDefaultPermissionsForRole(assignedRole);
-    const syncedPermissions = syncLegacyPermissions(basePermissions);
+    const syncedPermissions = sanitizeStaffPermissions(syncLegacyPermissions(basePermissions), assignedRole);
 
     const newStaff = {
       id: `st-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -2195,7 +2430,7 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
         if (updatedData.role && updatedData.role !== st.role && !updatedData.permissions) {
           perms = getDefaultPermissionsForRole(updatedData.role);
         }
-        perms = syncLegacyPermissions(perms);
+        perms = sanitizeStaffPermissions(syncLegacyPermissions(perms), role);
 
         updatedMember = {
           ...st,
@@ -2463,24 +2698,22 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       let startDateStr = todayStr;
       let expiryDateStr = '';
       const scenarioSeed = i % 10;
-      const now = new Date();
+      const shiftDays = (iso, days) => {
+        const [y, m, d] = String(iso).split('-').map(Number);
+        return formatDate(new Date(y, m - 1, d + days));
+      };
 
       if (scenarioSeed === 8) {
         status = 'Expiring Soon';
-        const expDate = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
-        expiryDateStr = expDate.toISOString().split('T')[0];
-        const stDate = new Date(expDate.getTime() - durationMonths * 30 * 24 * 60 * 60 * 1000);
-        startDateStr = stDate.toISOString().split('T')[0];
+        expiryDateStr = shiftDays(todayStr, 3);
+        startDateStr = shiftDays(expiryDateStr, -durationMonths * 30);
       } else if (scenarioSeed === 9) {
         status = 'Expired';
-        const expDate = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
-        expiryDateStr = expDate.toISOString().split('T')[0];
-        const stDate = new Date(expDate.getTime() - durationMonths * 30 * 24 * 60 * 60 * 1000);
-        startDateStr = stDate.toISOString().split('T')[0];
+        expiryDateStr = shiftDays(todayStr, -5);
+        startDateStr = shiftDays(expiryDateStr, -durationMonths * 30);
       } else {
         status = 'Active';
-        const expDate = new Date(now.getTime() + (durationMonths * 30 - 5) * 24 * 60 * 60 * 1000);
-        expiryDateStr = expDate.toISOString().split('T')[0];
+        expiryDateStr = shiftDays(todayStr, durationMonths * 30 - 5);
         startDateStr = todayStr;
       }
 
@@ -2492,6 +2725,10 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       const receiptNo = `TEST-REC-${Date.now()}-${createdCount + 1}`;
       const gender = i % 2 === 0 ? 'Male' : 'Female';
       const phone = `98765${String(10000 + (uniqueNum % 90000)).slice(-5)}`;
+      // Keep paidOn off when the synthetic start is outside the 60-day window so a later sync is not rejected.
+      const historyPaid = !validatePaidOn(startDateStr, todayStr)
+        ? paidStamp(startDateStr, { start: startDateStr, end: expiryDateStr })
+        : { date: startDateStr, periodStart: startDateStr, periodEnd: expiryDateStr, startDate: startDateStr, endDate: expiryDateStr, enteredAt: new Date().toISOString() };
 
       const newRenewal = {
         renewalId: `TEST-RN-${Date.now()}-${createdCount + 1}`,
@@ -2507,8 +2744,9 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
         discount,
         fine: 0,
         receiptNo,
-        date: startDateStr,
-        staffName: currentStaff?.name || "Admin (Test Generator)"
+        ...historyPaid,
+        staffName: feeCollector().staffName || 'Test Generator',
+        ...feeCollector(),
       };
 
       const newStudentObj = {
@@ -2533,7 +2771,9 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
         status,
         internalNotes: "Synthetic student created via Test Data Generator.",
         joinedDate: startDateStr,
-        renewalHistory: [newRenewal],
+        billingAnchorDay: Number(String(startDateStr).slice(8, 10)) || undefined,
+        ...periodSnapshots(settings, { customGraceDays: undefined }),
+        renewalHistory: [{ ...newRenewal, ...periodSnapshots(settings, {}) }],
         seatHistory: [{
           changeId: `TEST-SH-${Date.now()}-${createdCount + 1}`,
           previousSeat: "None",
@@ -2557,12 +2797,15 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
         fine: 0,
         netTotal,
         method: i % 3 === 0 ? "Cash" : "UPI",
-        date: startDateStr,
-        staffName: currentStaff?.name || "Admin (Test Generator)",
+        ...(i % 3 === 0 ? {} : { referenceNo: `TEST-${receiptNo}` }),
+        ...historyPaid,
+        ...feeCollector(),
+        staffName: feeCollector().staffName || 'Test Generator',
         isTestData: true,
         source: 'TEST_GENERATOR'
       };
 
+      newStudentObj.paymentHistory = [newPayment];
       newStudents.push(newStudentObj);
       newPayments.push(newPayment);
       createdCount++;
@@ -2631,6 +2874,11 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       archivedStudents, setArchivedStudents,
       waitingList, setWaitingList,
       todayStr,
+      backendStatus,
+      isRefreshing,
+      refreshData,
+      readOnly,
+      lockedStaffId,
       // Central helpers
       getSetupStatus,
       resolveScope,
@@ -2662,6 +2910,8 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       updateStudentDetails,
       addBulkStudents,
       renewSubscription,
+      updatePaymentProofs,
+      canManagePaymentProofs,
       changeSeat,
       addStudentDocument,
       extendStudentDueDate,
@@ -2688,9 +2938,6 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       updateStaffMember,
       toggleStaffStatus,
       deleteStaffMember,
-      // Backend Status & Read-Only Context
-      backendStatus,
-      readOnly
     }}>
       {children}
     </LibraryContext.Provider>
