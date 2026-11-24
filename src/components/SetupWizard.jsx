@@ -6,7 +6,7 @@ import { DEFAULT_LIBRARY_LOGO } from '../utils/libraryLogo';
 import { motion } from 'framer-motion';
 import { Building2, Plus, Trash2, CheckCircle, Clock, Copy, Eye, FileText, CheckCircle2, ShieldCheck, X } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { deskGrowthMessage } from '../utils/planLimitCopy';
+import { deskGrowthMessage, countPlanDesks, syncDraftSeats } from '../utils/planLimitCopy';
 import { NumericInput } from './NumericInput';
 import { resolveConfigurationScope, matchesScope } from '../utils/scopeResolver';
 import { compileDurationPricing, defaultTiers, durationUnitForCycle, inferUnitPrice } from '../utils/pricingCalculator';
@@ -91,7 +91,9 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
     { id: "st-fixed", name: "Standard Fixed", allocationMode: 'Fixed', capacityMode: null, maximumStudentsAllowed: null },
     { id: "st-flex", name: "Flexible Non-Fixed", allocationMode: 'Non-Fixed', capacityMode: 'Unlimited', maximumStudentsAllowed: null }
   ]));
-  const [tempSeats, setTempSeats] = useState(draft?.tempSeats ?? [...seats]);
+  const liveSeatIdsAtOpenRef = useRef(draft?.liveSeatIdsAtOpen ?? seats.map(s => s.id).filter(Boolean));
+  const [tempSeats, setTempSeats] = useState(() => syncDraftSeats(draft?.tempSeats, seats, draft?.liveSeatIdsAtOpen ?? seats.map(s => s.id).filter(Boolean)));
+
   const [tempShifts, setTempShifts] = useState(draft?.tempShifts ?? (shifts.length > 0 ? [...shifts] : [
     { id: "sh-1", name: "Full Day", startTime: "06:00", endTime: "20:00", daysOfWeek: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], active: true },
     { id: "sh-2", name: "Morning", startTime: "06:00", endTime: "12:00", daysOfWeek: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], active: true }
@@ -164,14 +166,20 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
       tempDocTypes,
       tempDocDeadlineDays,
       selectedBranchId: scope.resolvedBranchId,
-      selectedSectionId: scope.resolvedSectionId
+      selectedSectionId: scope.resolvedSectionId,
+      liveSeatIdsAtOpen: liveSeatIdsAtOpenRef.current
     };
     localStorage.setItem('wizardDraft', JSON.stringify(draftData));
     setDraft(draftData);
     if (showToast) toast.success('Progress saved as draft.');
   };
 
+  useEffect(() => {
+    setTempSeats(prev => syncDraftSeats(prev, seats, liveSeatIdsAtOpenRef.current));
+  }, [seats]);
+
   // Live preview for seat generator in Step 4
+
   useEffect(() => {
     const preview = [];
     if (generatorMode === 'simple') {
@@ -243,7 +251,7 @@ export const SetupWizard = ({ isOpen = true, onClose, isEditMode = false }) => {
       }
     });
 
-    const blocked = await deskGrowthMessage(tempSeats.length, addedCount);
+    const blocked = await deskGrowthMessage(countPlanDesks(tempSeats), addedCount);
     if (blocked) return toast.error(blocked);
     setTempSeats(newSeatsList);
     if (addedCount > 0) toast.success(`Generated and added ${addedCount} physical seats for ${scope.scopeDisplayName}.`);

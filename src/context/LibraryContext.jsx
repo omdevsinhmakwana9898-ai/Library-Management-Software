@@ -9,6 +9,7 @@ import { buildAdmissionVoid } from '../utils/admissionVoid.js';
 import { buildRenewalVoid, markPaymentVoided } from '../utils/paymentVoid.js';
 import { todayIST, validatePaidOn, applyRenewalToStudent, formatDate } from '../utils/dateUtils';
 import { periodSnapshots, holdsDesk, NEW_LIBRARY_GRACE_DAYS, DEFAULT_EXPIRED_PERIOD_DAYS } from '../utils/subscriptionLifecycle.js';
+import { countPlanStudents, studentLimitExceededCopy, cachedStudentLimit, rememberPlanLimits } from '../utils/planLimitCopy';
 import { stampPaymentReference } from '../utils/paymentReference';
 import { collectorIdentity } from '../utils/paymentCollector';
 import { paymentProofRefs, paymentProofModeOf, paymentProofsMissing, PAYMENT_PROOF_REQUIRED_MESSAGE } from '../utils/paymentProof';
@@ -821,6 +822,12 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
 
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  useEffect(() => {
+    if (backendStatus !== 'online') return;
+    api.subscription().then(sub => rememberPlanLimits(sub?.limits)).catch(() => {});
+  }, [backendStatus]);
+
+
   // Data-only refresh: re-fetches the backend snapshot (no page reload, filters preserved).
   const refreshData = async () => {
     setIsRefreshing(true);
@@ -928,11 +935,45 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
   useEffect(() => { syncRef.current?.queue('branches', branches); }, [branches]);
   useEffect(() => { syncRef.current?.queue('sections', sections); }, [sections]);
   useEffect(() => { syncRef.current?.queue('seatTypes', seatTypes); }, [seatTypes]);
-  useEffect(() => { syncRef.current?.queue('seats', seats); }, [seats]);
+  const prevSeatIdsRef = useRef(null);
+  const prevSeatCountRef = useRef(null);
+  const prevStudentCountRef = useRef(null);
+  useEffect(() => {
+    const sync = syncRef.current;
+    const currentIds = new Set(seats.map(s => s.id).filter(Boolean));
+    if (prevSeatIdsRef.current) {
+      const removed = [...prevSeatIdsRef.current].filter(id => !currentIds.has(id));
+      if (removed.length) {
+        try {
+          const raw = localStorage.getItem('wizardDraft');
+          if (raw) {
+            const draft = JSON.parse(raw);
+            if (Array.isArray(draft?.tempSeats)) {
+              const next = draft.tempSeats.filter(s => !removed.includes(s.id));
+              if (next.length !== draft.tempSeats.length) {
+                localStorage.setItem('wizardDraft', JSON.stringify({ ...draft, tempSeats: next }));
+              }
+            }
+          }
+        } catch { /* draft is best-effort */ }
+      }
+    }
+    prevSeatIdsRef.current = currentIds;
+    const prevCount = prevSeatCountRef.current;
+    prevSeatCountRef.current = seats.length;
+    if (typeof prevCount === 'number' && seats.length < prevCount) sync?.flush('seats', seats);
+    else sync?.queue('seats', seats);
+  }, [seats]);
   useEffect(() => { syncRef.current?.queue('shifts', shifts); }, [shifts]);
   useEffect(() => { syncRef.current?.queue('plans', plans); }, [plans]);
   useEffect(() => { syncRef.current?.queue('staffMembers', staffMembers); }, [staffMembers]);
-  useEffect(() => { syncRef.current?.queue('students', students); }, [students]);
+  useEffect(() => {
+    const sync = syncRef.current;
+    const prevCount = prevStudentCountRef.current;
+    prevStudentCountRef.current = students.length;
+    if (typeof prevCount === 'number' && students.length < prevCount) sync?.flush('students', students);
+    else sync?.queue('students', students);
+  }, [students]);
   useEffect(() => { syncRef.current?.queue('archivedStudents', archivedStudents); }, [archivedStudents]);
   useEffect(() => { syncRef.current?.queue('expenses', expenses); }, [expenses]);
   useEffect(() => { syncRef.current?.queue('payments', payments); }, [payments]);
@@ -1662,6 +1703,16 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       }
     }
 
+    const blockedByPlan = studentLimitExceededCopy(
+      countPlanStudents(students, { settings, today: todayStr }),
+      1,
+      cachedStudentLimit()
+    );
+    if (blockedByPlan) {
+      toast.error(blockedByPlan);
+      return null;
+    }
+
     const paidOn = studentData.paidOn || todayStr;
     const paidOnError = validatePaidOn(paidOn, todayStr);
     if (paidOnError) {
@@ -1792,6 +1843,32 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
         studentData.seatNo !== 'Non-Fixed Seat' ? studentData.seatNo : null,
         accumulatedStudents
       );
+
+      const planCapMsg = studentLimitExceededCopy(
+        countPlanStudents([...students, ...accumulatedStudents], { settings, today: todayStr }),
+        1,
+        cachedStudentLimit()
+      );
+      if (planCapMsg) {
+        if (i === 0) toast.error(planCapMsg);
+        if (fillWaitlist) {
+          accumulatedWaitlist.push({
+            id: `WL-${Date.now()}-${i}`,
+            libraryId: settings.libraryId,
+            name: studentData.name,
+            phone: studentData.phone,
+            branchId: studentData.branchId,
+            sectionId: studentData.sectionId,
+            seatTypeId: studentData.seatTypeId,
+            shiftId: studentData.shiftId,
+            planId: studentData.planId,
+            notes: "Added from Bulk Admission overflow",
+            date: todayStr,
+            status: "Pending"
+          });
+        }
+        continue;
+      }
 
       if (!check.allowed) {
         if (fillWaitlist) {

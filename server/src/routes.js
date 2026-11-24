@@ -39,7 +39,7 @@ import { createSubscriptionRouter } from './subscription.js';
 import { requireActiveSubscription, requireFeature, refreshSubscriptionStatus, accessFor, toClientAccess } from './subscriptionAccess.js';
 import { createPublicEnquiryRouter, createTenantEnquiryRouter } from './enquiry.js';
 import { createPublicDemoRequestRouter, createDemoRequestAdminRouter } from './demoRequests.js';
-import { createPlanAdminRouter, createPublicPlanRouter, SoftwarePlan, checkBranchLimit, checkStaffLimit, checkDeskLimit } from './plans.js';
+import { createPlanAdminRouter, createPublicPlanRouter, SoftwarePlan, checkBranchLimit, checkStaffLimit, checkDeskLimit, countCurrentDesks, countDesksInList } from './plans.js';
 import { createPaymentsAdminRouter } from './paymentsAdmin.js';
 import { createSystemWhatsappRouter } from './systemWhatsapp.js';
 import { createAssistedResetRouter } from './assistedReset.js';
@@ -692,8 +692,9 @@ async function createOne(req, res) {
     await reconcileStudents(req.tenantId, [body], { actor: req.user.email, settings: billing });
   }
   if (req.params.col === 'seats') {
-    const n = await req.Model.countDocuments({ tenantId: req.tenantId });
-    await checkDeskLimit(req.tenantId, n + 1, n);
+    const existing = await req.Model.find({ tenantId: req.tenantId }).lean();
+    const n = countDesksInList(existing);
+    await checkDeskLimit(req.tenantId, countDesksInList([...existing, body]), n);
   }
   if (req.params.col === 'payments') {
     stampNewPayment(body, await collectorStampFor(req), await proofPolicyFor(req));
@@ -815,8 +816,8 @@ async function replaceCollection(req, res) {
   const prevArchived = col === 'archivedStudents' ? await req.Model.find({ tenantId: req.tenantId }).lean() : null;
   if (col === 'seats') {
     await validateSeatSync(req.tenantId, req.body.map(stripMeta));
-    const prev = await req.Model.countDocuments({ tenantId: req.tenantId });
-    const next = new Set(req.body.map(stripMeta).map(b => keyOf(col, b)).filter(Boolean)).size;
+    const prev = await countCurrentDesks(req.tenantId);
+    const next = countDesksInList(req.body.map(stripMeta));
     await checkDeskLimit(req.tenantId, next, prev);
   }
   let newPayments = null;

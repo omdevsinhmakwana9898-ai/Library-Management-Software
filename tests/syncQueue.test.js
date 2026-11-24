@@ -53,3 +53,17 @@ test('createSyncQueue never pushes blocked keys, even after markSynced', async (
   await tick();
   assert.deepEqual(writes, ['plans']);
 });
+
+test('flush writes a shrink immediately without waiting for the debounce', async () => {
+  const writes = [];
+  const q = createSyncQueue({
+    delay: 200,
+    write: async (key, value) => { writes.push([key, value.length]); },
+  });
+  q.enable();
+  q.markSynced('seats', [{ id: '1' }, { id: '2' }]);
+  const started = Date.now();
+  await q.flush('seats', [{ id: '1' }]);
+  assert.ok(Date.now() - started < 100);
+  assert.deepEqual(writes, [['seats', 1]]);
+});

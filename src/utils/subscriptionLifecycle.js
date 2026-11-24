@@ -81,6 +81,9 @@ export function subscriptionLifecycle(student, { settings = null, today = '', so
   if (!student) return empty;
   if (stored === 'Archived') return { ...empty, status: 'Archived', label: 'Archived' };
   if (stored === 'Cancelled') return { ...empty, status: 'Cancelled', label: 'Cancelled' };
+  if (stored === 'Left' || stored === 'Inactive' || stored === 'Deleted' || stored === 'Removed') {
+    return { ...empty, status: stored, label: stored };
+  }
 
   const graceDays = graceDaysOf(student, settings);
   const expiredPeriodDays = expiredPeriodDaysOf(student, settings);

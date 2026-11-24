@@ -35,9 +35,12 @@ export class CapacityError extends Error {
   }
 }
 
-/** Active and Grace Period count. Expired, Cancelled, and Archived do not. */
+const INACTIVE_STUDENT_STATUSES = new Set(['Archived', 'Cancelled', 'Left', 'Inactive', 'Deleted', 'Removed']);
+
+/** Active and Grace Period count. Expired, cancelled, left, deleted, and archived do not. */
 export function countsTowardStudentLimit(student, { settings = null, today = todayIn() } = {}) {
   if (!student) return false;
+  if (INACTIVE_STUDENT_STATUSES.has(String(student.status || ''))) return false;
   const life = subscriptionLifecycle(student, { settings, today });
   return life.status === 'Active' || life.status === 'Grace Period';
 }

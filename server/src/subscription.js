@@ -5,7 +5,7 @@ import express from 'express';
 import { Library, User, models, Settings } from './models.js';
 import { requireRole } from './auth.js';
 import { audit } from './audit.js';
-import { SoftwarePlan, pubPlan, libraryLimits } from './plans.js';
+import { SoftwarePlan, pubPlan, libraryLimits, countCurrentDesks } from './plans.js';
 import { countsTowardStudentLimit } from './students.js';
 import { todayIn } from './finance.js';
 import { paymentProvider, planPrice, INTERVALS, initialSubscription } from './billing.js';
@@ -25,7 +25,7 @@ async function usageOf(tenantId) {
     models.students.find({ tenantId }).lean(),
     User.countDocuments({ tenantId, role: 'staff' }),
     models.branches ? models.branches.countDocuments({ tenantId }) : 0,
-    models.seats.countDocuments({ tenantId }),
+    countCurrentDesks(tenantId),
     Settings.findOne({ tenantId }).lean(),
   ]);
   const today = todayIn();

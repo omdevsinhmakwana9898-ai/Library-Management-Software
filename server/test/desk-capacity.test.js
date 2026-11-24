@@ -93,3 +93,60 @@ test('a lower deskLimit keeps existing desks and blocks only an increase', async
   assert.equal((await call('GET', '/api/seats', { token: A() })).body.length, 5);
   assert.equal((await call('POST', '/api/seats', { token: A(), body: seat('extra') })).status, 409);
 });
+
+test('removing desks frees capacity so the same number can be added again', async () => {
+  await plan('sync5', { deskLimit: 5 });
+  assert.equal((await call('PUT', '/api/seats', { token: A(), body: seats(5) })).status, 200);
+  const over = await call('PUT', '/api/seats', { token: A(), body: seats(6) });
+  assert.equal(over.status, 409);
+  assert.equal((await call('PUT', '/api/seats', { token: A(), body: seats(3) })).status, 200);
+  assert.equal((await call('GET', '/api/seats', { token: A() })).body.length, 3);
+  const usage = await call('GET', '/api/subscription', { token: A() });
+  assert.equal(usage.body.usage.desks, 3);
+  assert.equal((await call('PUT', '/api/seats', { token: A(), body: seats(5) })).status, 200);
+  assert.equal((await call('POST', '/api/seats', { token: A(), body: seat('extra') })).status, 409);
+  assert.equal((await call('DELETE', '/api/seats/5', { token: A() })).status, 200);
+  assert.equal((await call('POST', '/api/seats', { token: A(), body: seat('extra') })).status, 201);
+  assert.equal((await call('GET', '/api/seats', { token: A() })).body.length, 5);
+  const stillOver = await call('POST', '/api/seats', { token: A(), body: seat('too-many') });
+  assert.equal(stillOver.status, 409);
+});
+
+test('soft-deleted and duplicate desks do not keep the desk cap full', async () => {
+  await plan('dups3', { deskLimit: 3 });
+  const body = [
+    { id: '1', name: 'A-1' },
+    { id: '1b', name: 'A-1' },
+    { id: '2', name: 'A-2', isDeleted: true },
+    { id: '3', name: 'A-3' },
+  ];
+  assert.equal((await call('PUT', '/api/seats', { token: A(), body })).status, 200);
+  const usage = await call('GET', '/api/subscription', { token: A() });
+  assert.equal(usage.body.usage.desks, 2);
+  assert.equal((await call('POST', '/api/seats', { token: A(), body: { id: '4', name: 'A-4' } })).status, 201);
+  assert.equal((await call('POST', '/api/seats', { token: A(), body: { id: '5', name: 'A-5' } })).status, 409);
+});
+
+test('removing a student at the cap lets a new admission through; leftover students do not count', async () => {
+  await plan('stu1', { studentLimit: 1, deskLimit: 20 });
+  assert.equal((await call('PUT', '/api/students', { token: A(), body: [] })).status, 200);
+  const today = todayIn();
+  const active = { id: 'STAY', name: 'Stay', expiryDate: '2099-01-01' };
+  assert.equal((await call('POST', '/api/students', { token: A(), body: active })).status, 201);
+  assert.equal((await call('POST', '/api/students', { token: A(), body: { id: 'NOPE', name: 'Nope', expiryDate: '2099-06-01' } })).status, 409);
+
+  const leftover = [
+    { id: 'LEFT', name: 'Left', status: 'Left', expiryDate: '2099-01-01' },
+    { id: 'INA', name: 'Inactive', status: 'Inactive', expiryDate: '2099-01-01' },
+    { id: 'CAN', name: 'Cancelled', status: 'Cancelled', expiryDate: '2099-01-01' },
+    { id: 'EXP', name: 'Expired', expiryDate: '2020-01-01', graceDaysSnapshot: 0, expiredPeriodDaysSnapshot: 0 },
+  ];
+  assert.equal((await call('PUT', '/api/students', { token: A(), body: leftover })).status, 200);
+  const sum = (await call('GET', '/api/students-summary', { token: A() })).body;
+  assert.equal(sum.capacity.used, 0);
+  assert.equal((await call('POST', '/api/students', { token: A(), body: { id: 'NEW', name: 'New', expiryDate: addDays(today, 30) } })).status, 201);
+
+  assert.equal((await call('PUT', '/api/students', { token: A(), body: leftover })).status, 200);
+  const usage = await call('GET', '/api/subscription', { token: A() });
+  assert.equal(usage.body.usage.students, 0);
+});
