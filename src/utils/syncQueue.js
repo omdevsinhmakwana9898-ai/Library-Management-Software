@@ -55,6 +55,12 @@ export function createSyncQueue({ delay = 400, onError, write } = {}) {
       for (const key of blocked) clearTimer(key);
     },
     push,
+    /** Push immediately (used when seats/students shrink so capacity frees before the next add). */
+    flush(key, value) {
+      clearTimer(key);
+      if (!enabled || !allowed(key)) return Promise.resolve();
+      return push(key, value);
+    },
     queue(key, value) {
       if (!enabled || !allowed(key)) {
         clearTimer(key);

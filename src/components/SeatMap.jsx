@@ -9,7 +9,7 @@ import { getCanonicalShifts, normalizeShiftName, resolveCanonicalShift, shiftsOv
 import { SEAT_COLORS, SEAT_MAP_VIEWS, deskPaymentState, occupancyStatusClass, paymentStatusClass, filterPhotoTiles } from '../utils/seatMapViews';
 import { useStudentPhoto } from '../utils/useStudentPhoto';
 import toast from 'react-hot-toast';
-import { deskGrowthMessage } from '../utils/planLimitCopy';
+import { deskGrowthMessage, countPlanDesks } from '../utils/planLimitCopy';
 import { holdsDesk } from '../utils/subscriptionLifecycle.js';
 import { todayIST } from '../utils/dateUtils';
 
@@ -367,7 +367,7 @@ export const SeatMap = ({ onSelectStudent, onRelocateStudent, onOpenNewStudent }
     });
 
     if (added > 0) {
-      const blocked = await deskGrowthMessage(seats.length, added);
+      const blocked = await deskGrowthMessage(countPlanDesks(seats), added);
       if (blocked) return toast.error(blocked);
       setSeats(prev => [...prev, ...newItems]);
       toast.success(`Added ${added} new desks! ${skippedDuplicates > 0 ? `(${skippedDuplicates} duplicates skipped)` : ''}`);

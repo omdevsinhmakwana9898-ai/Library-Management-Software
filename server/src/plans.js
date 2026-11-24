@@ -1,7 +1,7 @@
 // Issue #14: software plans (what a library pays Library OS for) and their limits.
 import express from 'express';
 import mongoose from 'mongoose';
-import { Library, User } from './models.js';
+import { Library, User, models } from './models.js';
 import { audit } from './audit.js';
 import { INTERVALS, assertDurationDiscounts, priceQuote } from './billing.js';
 
@@ -184,6 +184,34 @@ export class LimitError extends Error {
     super(`${lead}Your plan allows up to ${limit} ${noun}. Upgrade the plan to add more.`);
     this.status = 409; this.code = `${kind}_limit`; this.limit = limit;
   }
+}
+
+/** A desk counts toward the plan cap only while it currently exists (not soft-deleted). */
+export function deskCountsTowardLimit(seat) {
+  if (!seat) return false;
+  if (seat.isDeleted || seat.deletedAt || seat.deleted) return false;
+  const status = String(seat.status || '').toLowerCase();
+  if (status === 'deleted' || status === 'removed' || status === 'inactive') return false;
+  return true;
+}
+
+export function countDesksInList(seats = []) {
+  const seen = new Set();
+  let n = 0;
+  for (const seat of seats) {
+    if (!deskCountsTowardLimit(seat)) continue;
+    const name = String(seat.name ?? seat.seatNumber ?? '').trim().toLowerCase();
+    const key = `${seat.branchId || 'none'}|${seat.sectionId || 'none'}|${name || seat.id || seat._key || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    n++;
+  }
+  return n;
+}
+
+export async function countCurrentDesks(tenantId) {
+  const seats = await models.seats.find({ tenantId }).lean();
+  return countDesksInList(seats);
 }
 
 /** Only growth past Maximum Physical Desks is blocked. Existing desks are never removed. */
