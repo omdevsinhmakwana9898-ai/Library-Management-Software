@@ -148,6 +148,55 @@ test('mobile recovery uses WhatsApp OTP; login stays mobile plus password with n
   }
 });
 
+test('used, revoked and expired invites return their own code', async () => {
+  const used = await call('POST', '/api/invites', { token: A(), body: { email: 'used.code@test.local', name: 'Used' } });
+  const usedToken = tokenFrom(used.body.link);
+  assert.equal((await call('POST', '/api/auth/invite/accept', { body: { token: usedToken, password: 'StaffPass-123' } })).status, 200);
+  const again = await call('POST', '/api/auth/invite/accept', { body: { token: usedToken, password: 'StaffPass-123' } });
+  assert.equal(again.status, 410);
+  assert.equal(again.body.code, 'accepted');
+  const info = await call('GET', `/api/auth/invite/${usedToken}`);
+  assert.equal(info.status, 410);
+  assert.equal(info.body.code, 'accepted');
+
+  const revoked = await call('POST', '/api/invites', { token: A(), body: { email: 'rev.code@test.local' } });
+  await call('POST', `/api/invites/${revoked.body.id}/revoke`, { token: A() });
+  const revToken = tokenFrom(revoked.body.link);
+  const revAccept = await call('POST', '/api/auth/invite/accept', { body: { token: revToken, password: 'Password-123' } });
+  assert.equal(revAccept.status, 410);
+  assert.equal(revAccept.body.code, 'revoked');
+  assert.equal((await call('GET', `/api/auth/invite/${revToken}`)).body.code, 'revoked');
+
+  const expired = await call('POST', '/api/invites', { token: A(), body: { email: 'exp.code@test.local' } });
+  const { Invite } = await import('../src/accounts.js');
+  await Invite.updateOne({ email: 'exp.code@test.local', revokedAt: null }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+  const expToken = tokenFrom(expired.body.link);
+  const expAccept = await call('POST', '/api/auth/invite/accept', { body: { token: expToken, password: 'Password-123' } });
+  assert.equal(expAccept.status, 410);
+  assert.equal(expAccept.body.code, 'expired');
+  assert.equal((await call('GET', `/api/auth/invite/${expToken}`)).body.code, 'expired');
+});
+
+test('invite accept stores an optional mobile and rejects a bad or taken one', async () => {
+  const taken = '9000000001';
+  await User.updateOne({ email: 'admin-a@test.local' }, { $set: { mobile: taken } });
+  const clash = await call('POST', '/api/invites', { token: A(), body: { email: 'mobile.clash@test.local' } });
+  const clashToken = tokenFrom(clash.body.link);
+  const dup = await call('POST', '/api/auth/invite/accept', { body: { token: clashToken, password: 'StaffPass-123', mobile: taken } });
+  assert.equal(dup.status, 409);
+  assert.match(dup.body.error, /mobile number already exists/);
+  assert.equal((await call('GET', `/api/auth/invite/${clashToken}`)).body.email, 'mobile.clash@test.local', 'invite stays usable');
+
+  const bad = await call('POST', '/api/auth/invite/accept', { body: { token: clashToken, password: 'StaffPass-123', mobile: '12' } });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /valid mobile/);
+
+  const ok = await call('POST', '/api/auth/invite/accept', { body: { token: clashToken, password: 'StaffPass-123', mobile: '91 90000 00002' } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  const saved = await User.findOne({ email: 'mobile.clash@test.local' }).lean();
+  assert.equal(saved.mobile, '9000000002');
+});
+
 test('linked Google recovery sets a My Library OS password and leaves googleSub unchanged', async () => {
   resetRateLimits();
   const owner = await User.findOne({ email: 'admin-a@test.local' });

@@ -81,6 +81,16 @@ otpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 86400 });
 export const PasswordResetOtp = mongoose.models.PasswordResetOtp || mongoose.model('PasswordResetOtp', otpSchema);
 
 const inviteStatus = (i) => i.usedAt ? 'accepted' : i.revokedAt ? 'revoked' : i.expiresAt < new Date() ? 'expired' : 'pending';
+const INVITE_CLOSED = {
+  accepted: 'This invite was already accepted. Please sign in.',
+  expired: 'This invite link has expired.',
+  revoked: 'This invite has been revoked.',
+  invalid: 'This invite link is invalid, expired or already used.',
+};
+const closedInvite = (code) => {
+  const key = INVITE_CLOSED[code] ? code : 'invalid';
+  return { status: 410, error: INVITE_CLOSED[key], code: key };
+};
 const pubInvite = (i) => ({ id: String(i._id), email: i.email, name: i.name, role: i.role, staffId: i.staffId, expiresAt: i.expiresAt, status: inviteStatus(i), createdAt: i.createdAt });
 
 /* Simple in-memory per-key rate limiter (per instance). */
@@ -130,10 +140,13 @@ const mask = (email) => email.replace(/^(.)(.*)(@.*)$/, (_, a, b, c) => a + '*'.
  * Atomic single use; the account is bound to the invited email, library and role.
  * With `google`, the verified Google email must equal the invited email.
  */
-export async function acceptInvite({ token, name, passwordHash, google, ip }) {
+export async function acceptInvite({ token, name, passwordHash, google, mobile, ip }) {
   const now = new Date();
   const i = await Invite.findOneAndUpdate({ tokenHash: sha(token), usedAt: null, revokedAt: null, expiresAt: { $gt: now } }, { $set: { usedAt: now } }, { new: true });
-  if (!i) return { status: 410, error: 'This invite link is invalid, expired or already used', code: 'invite_invalid' };
+  if (!i) {
+    const existing = await Invite.findOne({ tokenHash: sha(token) }).lean();
+    return closedInvite(existing ? inviteStatus(existing) : 'invalid');
+  }
   const release = () => Invite.updateOne({ _id: i._id }, { $set: { usedAt: null } });
   if (google && String(google.email).toLowerCase() !== i.email) {
     await release();
@@ -149,12 +162,31 @@ export async function acceptInvite({ token, name, passwordHash, google, ip }) {
     await release();
     return { status: 409, error: 'An account with this email already exists. Sign in instead.', code: 'account_exists' };
   }
-  const user = await User.create({
-    email: i.email, name: name || i.name || google?.name || '', role: i.role, tenantId: i.tenantId, libraryId: i.tenantId, staffId: i.staffId,
-    ...(passwordHash ? { passwordHash } : {}),
-    ...(google ? { googleSub: google.sub } : {}),
-    authProviders: [google ? 'google' : 'password'],
-  });
+  const mobileNorm = mobile ? normalizeMobile(mobile) : '';
+  if (mobileNorm && !isMobile(mobileNorm)) {
+    await release();
+    return { status: 400, error: 'Enter a valid mobile number', code: 'invalid_mobile' };
+  }
+  if (mobileNorm && await User.exists({ mobile: mobileNorm })) {
+    await release();
+    return { status: 409, error: 'An account with this mobile number already exists. Sign in instead.', code: 'mobile_exists' };
+  }
+  let user;
+  try {
+    user = await User.create({
+      email: i.email, name: name || i.name || google?.name || '', role: i.role, tenantId: i.tenantId, libraryId: i.tenantId, staffId: i.staffId,
+      ...(mobileNorm ? { mobile: mobileNorm } : {}),
+      ...(passwordHash ? { passwordHash } : {}),
+      ...(google ? { googleSub: google.sub } : {}),
+      authProviders: [google ? 'google' : 'password'],
+    });
+  } catch (e) {
+    await release();
+    if (e?.code === 11000 && (e.keyPattern?.mobile || e.keyValue?.mobile)) {
+      return { status: 409, error: 'An account with this mobile number already exists. Sign in instead.', code: 'mobile_exists' };
+    }
+    throw e;
+  }
   await Invite.updateOne({ _id: i._id }, { $set: { usedBy: String(user._id) } });
   await audit({ user: { id: String(user._id), email: user.email, role: user.role }, ip }, 'invite.accepted', { tenantId: i.tenantId, target: i.email, detail: { via: google ? 'google' : 'password' } });
   return { user };
@@ -165,7 +197,10 @@ export function createPublicAccountRouter({ issueSession }) {
 
   r.get('/auth/invite/:token', wrap(async (req, res) => {
     const i = await Invite.findOne({ tokenHash: sha(req.params.token) }).lean();
-    if (!i || inviteStatus(i) !== 'pending') return res.status(410).json({ error: 'This invite link is invalid, expired or already used', code: i ? inviteStatus(i) : 'invalid' });
+    if (!i || inviteStatus(i) !== 'pending') {
+      const closed = closedInvite(i ? inviteStatus(i) : 'invalid');
+      return res.status(closed.status).json({ error: closed.error, code: closed.code });
+    }
     const lib = await Library.findOne({ libraryId: i.tenantId }).lean();
     res.json({ email: i.email, name: i.name, role: i.role, library: lib?.name, expiresAt: i.expiresAt });
   }));
@@ -174,7 +209,13 @@ export function createPublicAccountRouter({ issueSession }) {
     const { token, name, password } = req.body || {};
     if (!token) return res.status(400).json({ error: 'token is required' });
     if (!validatePassword(password)) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-    const r = await acceptInvite({ token, name, passwordHash: await hashPassword(password), ip: req.ip });
+    const rawMobile = req.body?.mobile;
+    let mobile = '';
+    if (rawMobile != null && String(rawMobile).trim() !== '') {
+      mobile = normalizeMobile(rawMobile);
+      if (!isMobile(mobile)) return res.status(400).json({ error: 'Enter a valid mobile number' });
+    }
+    const r = await acceptInvite({ token, name, mobile, passwordHash: await hashPassword(password), ip: req.ip });
     if (r.error) return res.status(r.status).json({ error: r.error, ...(r.code ? { code: r.code } : {}) });
     return issueSession(r.user, res);
   }));

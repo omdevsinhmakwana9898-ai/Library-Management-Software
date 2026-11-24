@@ -48,6 +48,8 @@ export function LoginScreen() {
   const [inviteLoading, setInviteLoading] = useState(Boolean(inviteToken));
   const [inviteError, setInviteError] = useState('');
   const [inviteName, setInviteName] = useState('');
+  const [inviteMobile, setInviteMobile] = useState('');
+  const [inviteErrorCode, setInviteErrorCode] = useState('');
   const [invitePassword, setInvitePassword] = useState('');
   const [inviteConfirm, setInviteConfirm] = useState('');
   const [inviteBusy, setInviteBusy] = useState(false);
@@ -90,14 +92,21 @@ export function LoginScreen() {
     let cancelled = false;
     setInviteLoading(true);
     setInviteError('');
+    setInviteErrorCode('');
     api.inviteInfo(inviteToken)
       .then(info => {
         if (cancelled) return;
         setInviteInfo(info);
         setInviteName(info?.name || '');
       })
-      .catch(() => {
-        if (!cancelled) setInviteError('This invite link is invalid, expired or already used.');
+      .catch((err) => {
+        if (cancelled) return;
+        const code = err?.code;
+        setInviteErrorCode(code || '');
+        if (code === 'accepted') setInviteError('This invite was already accepted. Please sign in.');
+        else if (code === 'expired') setInviteError('This invite link has expired.');
+        else if (code === 'revoked') setInviteError('This invite has been revoked.');
+        else setInviteError('This invite link is invalid, expired or already used.');
       })
       .finally(() => { if (!cancelled) setInviteLoading(false); });
     return () => { cancelled = true; };
@@ -205,7 +214,12 @@ export function LoginScreen() {
     }
     setInviteBusy(true);
     try {
-      const result = await api.acceptInvite({ token: inviteToken, name: inviteName.trim(), password: invitePassword });
+      const result = await api.acceptInvite({
+        token: inviteToken,
+        name: inviteName.trim(),
+        password: invitePassword,
+        ...(inviteMobile.trim() ? { mobile: inviteMobile.trim() } : {}),
+      });
       window.history.replaceState(null, '', window.location.pathname);
       completeLogin(result);
     } catch (err) {
@@ -425,7 +439,7 @@ export function LoginScreen() {
                   {inviteError}
                 </div>
                 <button type="button" className="btn btn-secondary" onClick={backToLogin} style={{ width: '100%', justifyContent: 'center' }}>
-                  Go to sign in
+                  {inviteErrorCode === 'accepted' ? 'Sign in' : 'Go to sign in'}
                 </button>
               </div>
             )}
@@ -464,12 +478,18 @@ export function LoginScreen() {
                     <input id="invite-name" className="form-input" type="text" autoComplete="name" value={inviteName} onChange={e => setInviteName(e.target.value)} required />
                   </div>
                   <div className="form-group">
-                    <label className="form-label" htmlFor="invite-password">Password</label>
-                    <input id="invite-password" className="form-input" type="password" autoComplete="new-password" value={invitePassword} onChange={e => setInvitePassword(e.target.value)} required />
+                    <label className="form-label" htmlFor="invite-mobile">Mobile number (optional)</label>
+                    <input id="invite-mobile" className="form-input" type="tel" inputMode="tel" autoComplete="tel" placeholder="98765 43210" value={inviteMobile} onChange={e => setInviteMobile(e.target.value)} />
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '8px 0 0' }}>Optional. Add it so you can reset your password on WhatsApp later.</p>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="invite-password">Choose a password</label>
+                    <input id="invite-password" className="form-input" type="password" autoComplete="new-password" minLength={8} value={invitePassword} onChange={e => setInvitePassword(e.target.value)} required />
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '8px 0 0' }}>At least 8 characters. You will be signed in after you join.</p>
                   </div>
                   <div className="form-group">
                     <label className="form-label" htmlFor="invite-confirm-password">Confirm password</label>
-                    <input id="invite-confirm-password" className="form-input" type="password" autoComplete="new-password" value={inviteConfirm} onChange={e => setInviteConfirm(e.target.value)} required />
+                    <input id="invite-confirm-password" className="form-input" type="password" autoComplete="new-password" minLength={8} value={inviteConfirm} onChange={e => setInviteConfirm(e.target.value)} required />
                   </div>
 
                   {alertMessage && <div role="alert" style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{alertMessage}</div>}

@@ -71,6 +71,6 @@ test('a different Google email cannot use the invite, and the invite stays usabl
 
 test('Google without an invite still never creates accounts; bad invites fail cleanly', async () => {
   assert.equal((await googleJoin(null, g('nobody@test.local'))).get('google_error'), 'not_registered');
-  assert.equal((await googleJoin('A'.repeat(43), g('nobody@test.local'))).get('google_error'), 'invite_invalid');
+  assert.equal((await googleJoin('A'.repeat(43), g('nobody@test.local'))).get('google_error'), 'invalid');
   assert.equal(await User.exists({ email: 'nobody@test.local' }), null);
 });
