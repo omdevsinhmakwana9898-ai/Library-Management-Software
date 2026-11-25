@@ -32,4 +32,16 @@ test('invite is created inside the existing Add Staff modal', () => {
   assert.match(team, /api\.invites\(/);
   assert.match(team, /api\.revokeInvite/);
   assert.match(team, /Activity log/);
+  assert.match(team, /Copy link/);
+  assert.match(team, /handleCopyLink/);
+  assert.match(team, /handleShare/);
+  assert.match(team, /api\.inviteShareLink/);
+  assert.match(team, /https:\/\/wa\.me\/\?text=/);
+  assert.match(team, /status === 'pending'/);
+  assert.match(settings, /phone: staff\.phone/);
+  assert.match(settings, /whatsappStatus/);
+  assert.match(settings, /branchId: staff\.branchId/);
+  assert.match(settings, /showStaffBranchSelector\(staffFormData\.role, branches\)/);
+  assert.match(settings, /id="staff-branch-select"/);
+  assert.match(settings, /resolveStaffBranchId/);
 });

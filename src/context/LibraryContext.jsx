@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import toast from 'react-hot-toast';
 import { isSubscriptionLockError } from '../utils/subscriptionLock';
 import { api, createSyncQueue, LOCKED_CONFIG_COLLECTIONS, SYNCED_COLLECTIONS } from '../utils/api';
-import { getDefaultPermissionsForRole, syncLegacyPermissions, staffAllows, sanitizeStaffPermissions } from '../utils/staffPermissions';
+import { getDefaultPermissionsForRole, syncLegacyPermissions, staffAllows, sanitizeStaffPermissions, staffLockedBranchId, staffAllowedBranchIds } from '../utils/staffPermissions';
 import { isShiftInPlan, resolveCanonicalShift, getCanonicalShifts, normalizeShiftName, shiftsOverlap } from '../utils/shiftUtils';
 import { areSeatTypesEquivalent } from '../utils/seatTypeUtils';
 import { buildAdmissionVoid } from '../utils/admissionVoid.js';
@@ -556,7 +556,7 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
     return saved ? JSON.parse(saved) : INITIAL_BRANCHES;
   });
 
-  const [activeBranchId, setActiveBranchId] = useState('all');
+  const [activeBranchId, setActiveBranchIdState] = useState('all');
 
   const [plans, setPlans] = useState(() => {
     const saved = localStorage.getItem('library_plans');
@@ -924,12 +924,29 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const lockedStaff = lockedStaffId ? staffMembers.find(st => st.id === lockedStaffId) : null;
+  const lockedBranchIds = staffAllowedBranchIds(lockedStaff);
+  const lockedBranchId = staffLockedBranchId(lockedStaff);
+
   useEffect(() => {
     if (!lockedStaffId) return;
     const mine = staffMembers.find(st => st.id === lockedStaffId);
     if (mine && currentStaff?.id !== mine.id) setCurrentStaff(mine);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lockedStaffId, staffMembers, currentStaff]);
+
+  useEffect(() => {
+    if (!lockedBranchIds?.length) return;
+    if (!lockedBranchIds.includes(activeBranchId)) setActiveBranchIdState(lockedBranchIds[0]);
+  }, [lockedBranchIds, activeBranchId, staffMembers]);
+
+  const setActiveBranchId = (value) => {
+    if (lockedBranchIds?.length) {
+      setActiveBranchIdState(lockedBranchIds.includes(value) ? value : lockedBranchIds[0]);
+      return;
+    }
+    setActiveBranchIdState(value);
+  };
 
   useEffect(() => { syncRef.current?.queue('settings', settings); }, [settings]);
   useEffect(() => { syncRef.current?.queue('branches', branches); }, [branches]);
@@ -2943,6 +2960,7 @@ export const LibraryProvider = ({ children, readOnly = false, lockedStaffId = nu
       shifts, setShifts,
       plans, setPlans,
       activeBranchId, setActiveBranchId,
+      lockedBranchId, lockedBranchIds,
       staffMembers, setStaffMembers,
       currentStaff, setCurrentStaff,
       students, setStudents,

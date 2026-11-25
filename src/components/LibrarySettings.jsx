@@ -17,6 +17,7 @@ import {
   STAFF_MODULES, STAFF_ACTIONS, STAFF_ROLES, 
   createEmptyPermissions, getDefaultPermissionsForRole, countAllowedActions, sanitizeStaffPermissions,
   FINANCIAL_MODULE_IDS, FINANCIAL_MATRIX, applyAllowAllFinancial, isWalletBlockedRole, emptyModuleActions,
+  resolveStaffBranchId, resolveStaffBranchIds, showStaffBranchSelector, isMultiBranchStaffRole,
 } from '../utils/staffPermissions';
 import { getCanonicalSeatTypes } from '../utils/seatTypeUtils';
 import { cycleConfig, effectiveCycleConfig, normalizePlanBillingCycle, CYCLE_MODE_LABELS } from '../utils/billingCycle';
@@ -269,6 +270,7 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
     email: '',
     role: 'Librarian',
     branchId: 'all',
+    branchIds: [],
     status: 'Active'
   });
 
@@ -713,7 +715,8 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
       phone: '',
       email: '',
       role: 'Librarian',
-      branchId: activeBranchId !== 'all' ? activeBranchId : 'all',
+      branchId: resolveStaffBranchId('Librarian', activeBranchId, branches),
+      branchIds: resolveStaffBranchIds('Librarian', [], branches, activeBranchId),
       status: 'Active'
     });
     setStaffInvite(null);
@@ -728,7 +731,8 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
       phone: staff.phone || '',
       email: staff.email || '',
       role: staff.role || 'Librarian',
-      branchId: staff.branchId || 'all',
+      branchId: resolveStaffBranchId(staff.role || 'Librarian', staff.branchId || (staff.branchIds && staff.branchIds[0]), branches),
+      branchIds: resolveStaffBranchIds(staff.role || 'Librarian', staff.branchIds, branches, staff.branchId),
       status: staff.status || 'Active'
     });
     setIsStaffModalOpen(true);
@@ -747,12 +751,18 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
         name: staff.name,
         role: 'staff',
         staffId: staff.id,
+        phone: staff.phone,
         permissions: sanitizeStaffPermissions(staff.permissions, staff.role),
+        branchId: staff.branchId || 'all',
+        branchIds: staff.branchIds || [],
       });
       const link = result?.link || '';
+      const whatsapp = result?.whatsapp || {};
       setStaffInvite({
         staff,
         link,
+        whatsappStatus: whatsapp.status || result?.whatsappStatus || '',
+        whatsappReason: whatsapp.reason || result?.whatsappReason || '',
         error: link ? '' : 'Invite link was not returned. You can try again.',
         busy: false,
       });
@@ -771,15 +781,21 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
       return toast.error('Please enter contact / mobile number');
     }
 
+    const branchIds = resolveStaffBranchIds(staffFormData.role, staffFormData.branchIds, branches, staffFormData.branchId);
+    const payload = {
+      ...staffFormData,
+      branchId: resolveStaffBranchId(staffFormData.role, staffFormData.branchId || branchIds[0], branches),
+      branchIds,
+    };
     if (editingStaffId) {
-      const ok = updateStaffMember(editingStaffId, staffFormData);
+      const ok = updateStaffMember(editingStaffId, payload);
       if (ok) closeStaffModal();
       return;
     }
     if (!staffFormData.email.trim()) {
       return toast.error('Email is required to invite this staff member.');
     }
-    const created = addStaffMember(staffFormData);
+    const created = addStaffMember(payload);
     if (!created) return;
     await createStaffInvite(created);
   };
@@ -2352,34 +2368,75 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: showStaffBranchSelector(staffFormData.role, branches) ? '1fr 1fr' : '1fr', gap: '12px' }}>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label" style={{ fontSize: '12px', fontWeight: 600 }}>Assign Role *</label>
                     <select 
                       id="staff-role-select"
                       className="form-input" 
                       value={staffFormData.role} 
-                      onChange={e => setStaffFormData(p => ({ ...p, role: e.target.value }))}
+                      onChange={e => {
+                        const role = e.target.value;
+                        setStaffFormData(p => {
+                          const branchIds = resolveStaffBranchIds(role, role === p.role ? p.branchIds : null, branches, activeBranchId !== 'all' ? activeBranchId : p.branchId);
+                          return {
+                            ...p,
+                            role,
+                            branchIds,
+                            branchId: resolveStaffBranchId(role, branchIds[0] || p.branchId, branches),
+                          };
+                        });
+                      }}
                     >
                       {STAFF_ROLES.map(r => (
                         <option key={r.id} value={r.id}>{r.name} — {r.description}</option>
                       ))}
                     </select>
                   </div>
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 600 }}>Branch Scope</label>
-                    <select 
-                      id="staff-branch-select"
-                      className="form-input" 
-                      value={staffFormData.branchId} 
-                      onChange={e => setStaffFormData(p => ({ ...p, branchId: e.target.value }))}
-                    >
-                      <option value="all">All Branches</option>
-                      {branches.map(b => (
-                        <option key={b.id} value={b.id}>{b.name}</option>
-                      ))}
-                    </select>
+                  {showStaffBranchSelector(staffFormData.role, branches) && (
+                  <div className="form-group" style={{ marginBottom: 0 }} id="staff-branch-select">
+                    <label className="form-label" style={{ fontSize: '12px', fontWeight: 600 }}>
+                      {isMultiBranchStaffRole(staffFormData.role) ? 'Branches' : 'Branch'}
+                    </label>
+                    {isMultiBranchStaffRole(staffFormData.role) ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '4px' }}>
+                        {branches.map(b => {
+                          const checked = (staffFormData.branchIds || []).includes(b.id);
+                          return (
+                            <label key={b.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => setStaffFormData(p => {
+                                  const cur = new Set(p.branchIds || []);
+                                  if (cur.has(b.id)) cur.delete(b.id);
+                                  else cur.add(b.id);
+                                  const branchIds = resolveStaffBranchIds(p.role, [...cur], branches, p.branchId);
+                                  return { ...p, branchIds, branchId: branchIds[0] || p.branchId };
+                                })}
+                              />
+                              {b.name}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <select
+                        className="form-input"
+                        value={staffFormData.branchId}
+                        onChange={e => setStaffFormData(p => ({
+                          ...p,
+                          branchId: e.target.value,
+                          branchIds: resolveStaffBranchIds(p.role, [e.target.value], branches, e.target.value),
+                        }))}
+                      >
+                        {branches.map(b => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                      </select>
+                    )}
                   </div>
+                  )}
                 </div>
 
                 <div className="form-group" style={{ marginBottom: 0 }}>
@@ -2414,6 +2471,12 @@ export const LibrarySettings = ({ settingsAction, onClearSettingsAction, onOpenS
                     )}
                     {staffInvite.link && (
                       <input id="staff-invite-link" className="form-input" type="text" readOnly value={staffInvite.link} onFocus={e => e.target.select()} />
+                    )}
+                    {staffInvite.whatsappStatus && (
+                      <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        WhatsApp: {staffInvite.whatsappStatus}
+                        {staffInvite.whatsappReason ? ` (${staffInvite.whatsappReason})` : ''}
+                      </p>
                     )}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                       {staffInvite.link && (

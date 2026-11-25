@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { api, getToken, setToken, setTenantContext, onUnauthorized } from '../utils/api';
+import { readInviteToken } from '../utils/inviteToken';
 import { setCacheScope, clearCacheScope } from '../utils/tenantCache';
 
 const AuthContext = createContext(null);
@@ -90,7 +91,11 @@ export function AuthProvider({ children }) {
       const code = params.get('google_error');
       const signupTok = params.get('google_signup');
       const resetTok = params.get('google_reset');
-      if (token) setToken(token);
+      if (token) {
+        let tab = false;
+        try { tab = sessionStorage.getItem('library_invite_tab') === '1' || Boolean(readInviteToken()); if (tab) sessionStorage.removeItem('library_invite_tab'); } catch { /* private mode */ }
+        setToken(token, { tab });
+      }
       if (code) setOauthError(code);
       if (signupTok) setGoogleSignupPending(signupTok);
       if (resetTok) setGoogleResetToken(resetTok);

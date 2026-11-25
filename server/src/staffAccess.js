@@ -35,6 +35,8 @@ export async function staffContext(req) {
     staff,
     role,
     permissions,
+    branchId: staff?.branchId ? String(staff.branchId) : null,
+    branchIds: Array.isArray(staff?.branchIds) ? staff.branchIds.map(String) : [],
     unrestricted: role === 'Admin',
     inactive: Boolean(staff && staff.status && staff.status !== 'Active'),
   };

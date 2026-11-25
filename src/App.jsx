@@ -27,6 +27,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthProvider, useAuth, prepareLocalCacheFor } from './auth/AuthContext';
 import { setCacheScope, clearCacheScope } from './utils/tenantCache';
 import { LoginScreen } from './auth/LoginScreen';
+import { readInviteToken } from './utils/inviteToken';
 import { SuperAdminDashboard } from './auth/SuperAdminDashboard';
 import { PartnerPortal } from './auth/PartnerPortal';
 import { api, setTenantContext } from './utils/api';
@@ -425,6 +426,12 @@ const RoleRouter = () => {
   React.useEffect(() => {
     try { localStorage.removeItem('library_mode_preference'); } catch { /* private mode */ }
   }, []);
+
+  // An invite link must work even if another user is already signed in in this browser.
+  // Don't wait on that session, and don't send the signed-in user into the app first.
+  if (readInviteToken()) {
+    return <LoginScreen existingUser={status === 'authenticated' ? user : null} />;
+  }
 
   if (status === 'loading') {
     return (

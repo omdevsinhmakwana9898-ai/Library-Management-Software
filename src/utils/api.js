@@ -16,8 +16,53 @@ export { LOCKED_CONFIG_COLLECTIONS, SYNCED_COLLECTIONS } from './syncQueue.js';
 
 const idemKey = () => globalThis.crypto?.randomUUID?.() || `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const TOKEN_KEY = 'library_api_token';
-export const getToken = () => localStorage.getItem(TOKEN_KEY);
-export const setToken = (t) => (t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY));
+const TAB_TOKEN_KEY = 'library_api_token_tab';
+const TAB_ISOLATED_KEY = 'library_api_token_tab_isolated';
+
+const storageGet = (store, key) => {
+  try { return store.getItem(key); } catch { return null; }
+};
+const storageSet = (store, key, value) => {
+  try {
+    if (value) store.setItem(key, value);
+    else store.removeItem(key);
+  } catch { /* private mode */ }
+};
+
+/** Prefer a tab-only token (invite accept in this tab) so other tabs keep their session. */
+export const getToken = () => {
+  if (typeof sessionStorage !== 'undefined') {
+    const tab = storageGet(sessionStorage, TAB_TOKEN_KEY);
+    if (tab) return tab;
+    if (storageGet(sessionStorage, TAB_ISOLATED_KEY)) return null;
+  }
+  if (typeof localStorage === 'undefined') return null;
+  return storageGet(localStorage, TOKEN_KEY);
+};
+
+/** Shared login writes localStorage. `{ tab: true }` keeps this tab on its own session. */
+export const setToken = (t, { tab = false } = {}) => {
+  const hasSession = typeof sessionStorage !== 'undefined';
+  const isolated = hasSession && (storageGet(sessionStorage, TAB_TOKEN_KEY) || storageGet(sessionStorage, TAB_ISOLATED_KEY));
+  if (tab) {
+    if (!hasSession) return;
+    storageSet(sessionStorage, TAB_TOKEN_KEY, t || null);
+    storageSet(sessionStorage, TAB_ISOLATED_KEY, '1');
+    return;
+  }
+  if (!t && isolated) {
+    storageSet(sessionStorage, TAB_TOKEN_KEY, null);
+    storageSet(sessionStorage, TAB_ISOLATED_KEY, '1');
+    return;
+  }
+  if (hasSession) {
+    storageSet(sessionStorage, TAB_TOKEN_KEY, null);
+    storageSet(sessionStorage, TAB_ISOLATED_KEY, null);
+  }
+  if (typeof localStorage !== 'undefined') storageSet(localStorage, TOKEN_KEY, t || null);
+};
+
+export const getSharedToken = () => (typeof localStorage === 'undefined' ? null : storageGet(localStorage, TOKEN_KEY));
 
 // Tenant context used by super admin drill-in (client admins are scoped server-side by their token)
 let tenantContext = { libraryId: null, readOnly: false };
@@ -27,9 +72,10 @@ export const getTenantContext = () => tenantContext;
 let unauthorizedHandler = null;
 export const onUnauthorized = (fn) => { unauthorizedHandler = fn; };
 
-export async function apiRequest(path, { method = 'GET', body, signal, retries = 0, timeoutMs = 20000, headers: extraHeaders } = {}) {
-  const headers = { 'Content-Type': 'application/json', ...(extraHeaders || {}) };
-  const token = getToken();
+export async function apiRequest(path, { method = 'GET', body, signal, retries = 0, timeoutMs = 20000, headers: extraHeaders, auth = true } = {}) {
+  const headers = { ...(extraHeaders || {}) };
+  if (body !== undefined && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+  const token = auth === false ? null : getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (tenantContext.libraryId) headers['X-Library-Id'] = tenantContext.libraryId;
   if (tenantContext.readOnly) headers['X-Read-Only'] = '1';
@@ -144,7 +190,7 @@ export const api = {
   forgotPasswordMobile: (mobile) => apiRequest('/auth/forgot-password-mobile', { method: 'POST', body: { mobile } }),
   resetPasswordMobile: (mobile, otp, newPassword) => apiRequest('/auth/reset-password-mobile', { method: 'POST', body: { mobile, otp, newPassword } }),
   resetPasswordGoogle: (token, newPassword) => apiRequest('/auth/reset-password-google', { method: 'POST', body: { token, newPassword } }),
-  inviteInfo: (token) => apiRequest(`/auth/invite/${encodeURIComponent(token)}`),
+  inviteInfo: (token) => apiRequest(`/auth/invite/${encodeURIComponent(token)}`, { auth: false }),
   signupConfig: () => apiRequest('/auth/signup/config'),
   signupStart: (email) => apiRequest('/auth/signup/start', { method: 'POST', body: { email } }),
   signupStartMobile: (mobile) => apiRequest('/auth/signup/start-mobile', { method: 'POST', body: { mobile } }),
@@ -187,9 +233,10 @@ export const api = {
   adminTestPaymentsConfig: () => apiRequest('/admin/payments/config/test', { method: 'POST', body: {} }),
   adminDeletionRequests: () => apiRequest('/admin/payments/deletion-requests'),
   adminResolveDeletionRequest: (libraryId, action) => apiRequest(`/admin/payments/deletion-requests/${libraryId}/resolve`, { method: 'POST', body: { action } }),
-  acceptInvite: async (body) => { const r = await apiRequest('/auth/invite/accept', { method: 'POST', body }); setToken(r.token); return r; },
+  acceptInvite: async (body) => { const r = await apiRequest('/auth/invite/accept', { method: 'POST', body, auth: false }); setToken(r.token, { tab: true }); return r; },
   invites: () => apiRequest('/invites'),
   createInvite: (body) => apiRequest('/invites', { method: 'POST', body }),
+  inviteShareLink: (id) => apiRequest(`/invites/${encodeURIComponent(id)}/share-link`, { method: 'POST' }),
   revokeInvite: (id) => apiRequest(`/invites/${encodeURIComponent(id)}/revoke`, { method: 'POST' }),
   auditLogs: (q = '') => apiRequest(`/audit-logs${q}`),
   // Notifications
