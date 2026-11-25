@@ -59,6 +59,9 @@ const OTP_MINUTES = () => Number(process.env.OTP_EXPIRY_MINUTES || 10);
 const inviteSchema = new mongoose.Schema({
   tenantId: { type: String, required: true, index: true },
   tokenHash: { type: String, required: true, unique: true },
+  // Second hash for a Copy/Share link added to a pending invite that had no
+  // usable cipher. The original tokenHash is never replaced. Absent on new invites.
+  extraTokenHash: { type: String, unique: true, sparse: true },
   email: { type: String, lowercase: true, trim: true },
   name: String,
   role: { type: String, enum: ['staff', 'client_admin'], default: 'staff' },
@@ -67,10 +70,10 @@ const inviteSchema = new mongoose.Schema({
   expiresAt: { type: Date, required: true },
   usedAt: Date, usedBy: String, revokedAt: Date,
   createdBy: String,
-  // Encrypted raw token so an owner can copy the same link the email and
-  // system WhatsApp already sent. Never returned by the list API. Invites
-  // created before this field existed have no cipher. share-link must not
-  // mint a new token for those: the emailed link has to keep working.
+  // Encrypted raw token so an owner can copy a link again. Never returned by
+  // the list API. New invites store the original token here. Older pending
+  // invites have no cipher; the first Copy/Share stores an additional token
+  // (extraTokenHash + this cipher) and leaves tokenHash alone.
   tokenCipher: String,
   whatsappStatus: String,
   whatsappReason: String,
@@ -196,6 +199,18 @@ export async function issueLinkedGooglePasswordReset(user, ip) {
 
 const mask = (email) => email.replace(/^(.)(.*)(@.*)$/, (_, a, b, c) => a + '*'.repeat(Math.min(b.length, 6)) + c);
 
+/** Match the emailed token or a later Copy/Share token on the same invite. */
+function inviteByToken(token) {
+  const hash = sha(token);
+  return { $or: [{ tokenHash: hash }, { extraTokenHash: hash }] };
+}
+
+function cipherMatchesInvite(invite, token) {
+  if (!token) return false;
+  const hash = sha(token);
+  return hash === invite.tokenHash || (!!invite.extraTokenHash && hash === invite.extraTokenHash);
+}
+
 /** Public (unauthenticated) routes. */
 /**
  * Issue #13: the one place an invite becomes an account (password or Google).
@@ -204,9 +219,9 @@ const mask = (email) => email.replace(/^(.)(.*)(@.*)$/, (_, a, b, c) => a + '*'.
  */
 export async function acceptInvite({ token, name, passwordHash, google, mobile, ip }) {
   const now = new Date();
-  const i = await Invite.findOneAndUpdate({ tokenHash: sha(token), usedAt: null, revokedAt: null, expiresAt: { $gt: now } }, { $set: { usedAt: now } }, { new: true });
+  const i = await Invite.findOneAndUpdate({ ...inviteByToken(token), usedAt: null, revokedAt: null, expiresAt: { $gt: now } }, { $set: { usedAt: now } }, { new: true });
   if (!i) {
-    const existing = await Invite.findOne({ tokenHash: sha(token) }).lean();
+    const existing = await Invite.findOne(inviteByToken(token)).lean();
     return closedInvite(existing ? inviteStatus(existing) : 'invalid');
   }
   const release = () => Invite.updateOne({ _id: i._id }, { $set: { usedAt: null } });
@@ -267,7 +282,7 @@ export function createPublicAccountRouter({ issueSession }) {
   const r = express.Router();
 
   r.get('/auth/invite/:token', wrap(async (req, res) => {
-    const i = await Invite.findOne({ tokenHash: sha(req.params.token) }).lean();
+    const i = await Invite.findOne(inviteByToken(req.params.token)).lean();
     if (!i || inviteStatus(i) !== 'pending') {
       const closed = closedInvite(i ? inviteStatus(i) : 'invalid');
       return res.status(closed.status).json({ error: closed.error, code: closed.code });
@@ -481,17 +496,19 @@ export function createTenantAccountRouter() {
     let token = '';
     if (i.tokenCipher) {
       try { token = decryptSecret(i.tokenCipher); } catch { token = ''; }
-      if (!token || sha(token) !== i.tokenHash) token = '';
+      if (!cipherMatchesInvite(i, token)) token = '';
     }
+    let added = false;
     if (!token) {
-      // Missing or unusable cipher. Leave the pending invite and its hash alone
-      // so the original emailed link stays valid until it expires.
-      return res.status(409).json({
-        error: 'This invite has no copyable link. Use the original email or WhatsApp link. It stays valid until it expires.',
-        code: 'share_link_unavailable',
-      });
+      // No usable cipher. Keep tokenHash and expiresAt. Add a second token
+      // so Copy/Share works and the emailed link stays valid until the same expiry.
+      token = crypto.randomBytes(32).toString('base64url');
+      i.extraTokenHash = sha(token);
+      i.tokenCipher = encryptSecret(token);
+      await i.save();
+      added = true;
     }
-    await audit(req, 'invite.share_link', { target: i.email, detail: { rotated: false } });
+    await audit(req, 'invite.share_link', { target: i.email, detail: { rotated: false, ...(added ? { added: true } : {}) } });
     res.json({ link: inviteLink(token) });
   }));
 

@@ -286,6 +286,7 @@ test('invite WhatsApp is best-effort from the system sender and the token stays 
     for (const row of [fromStaff, plus, failed]) {
       assert.equal(listed.includes(tokenFrom(row.body.link)), false);
       assert.equal(listed.includes('tokenCipher'), false);
+      assert.equal(listed.includes('extraTokenHash'), false);
     }
     const logs = await AuditLog.find({ action: 'invite.created', target: 'wa.staff@test.local' }).lean();
     const dumped = JSON.stringify(logs);
@@ -305,14 +306,61 @@ test('invite WhatsApp is best-effort from the system sender and the token stays 
     const before = await Invite.findOne({ _id: none.body.id, tenantId: 'lib-a' }).lean();
     await Invite.updateOne({ _id: none.body.id, tenantId: 'lib-a' }, { $unset: { tokenCipher: 1 } });
     const missing = await call('POST', `/api/invites/${none.body.id}/share-link`, { token: A() });
-    assert.equal(missing.status, 409);
-    assert.equal(missing.body.code, 'share_link_unavailable');
+    assert.equal(missing.status, 200);
+    const extraToken = tokenFrom(missing.body.link);
+    assert.notEqual(extraToken, oldToken);
     const still = await Invite.findOne({ _id: none.body.id, tenantId: 'lib-a' }).lean();
     assert.equal(still.tokenHash, before.tokenHash);
+    assert.equal(new Date(still.expiresAt).toISOString(), new Date(before.expiresAt).toISOString());
+    assert.ok(still.extraTokenHash);
+    assert.ok(still.tokenCipher);
     assert.equal(still.revokedAt || null, null);
     assert.equal(still.usedAt || null, null);
     assert.equal((await call('GET', `/api/auth/invite/${oldToken}`)).status, 200);
+    assert.equal((await call('GET', `/api/auth/invite/${extraToken}`)).status, 200);
+    const again = await call('POST', `/api/invites/${none.body.id}/share-link`, { token: A() });
+    assert.equal(again.status, 200);
+    assert.equal(again.body.link, missing.body.link);
+    const afterSecond = await Invite.findOne({ _id: none.body.id, tenantId: 'lib-a' }).lean();
+    assert.equal(afterSecond.tokenHash, before.tokenHash);
+    assert.equal(afterSecond.extraTokenHash, still.extraTokenHash);
     assert.equal((await call('POST', '/api/auth/invite/accept', { body: { token: oldToken, password: 'StaffPass-123' } })).status, 200);
+    assert.equal((await call('GET', `/api/auth/invite/${extraToken}`)).status, 410);
+    assert.equal((await call('POST', '/api/auth/invite/accept', { body: { token: extraToken, password: 'StaffPass-123' } })).status, 410);
+
+    const acceptExtra = await call('POST', '/api/invites', { token: A(), body: { email: 'wa.extra.accept@test.local' } });
+    assert.equal(acceptExtra.status, 201);
+    const acceptExtraOriginal = tokenFrom(acceptExtra.body.link);
+    await Invite.updateOne({ _id: acceptExtra.body.id, tenantId: 'lib-a' }, { $unset: { tokenCipher: 1 } });
+    const acceptExtraShare = await call('POST', `/api/invites/${acceptExtra.body.id}/share-link`, { token: A() });
+    assert.equal(acceptExtraShare.status, 200);
+    const acceptExtraToken = tokenFrom(acceptExtraShare.body.link);
+    assert.notEqual(acceptExtraToken, acceptExtraOriginal);
+    assert.equal((await call('POST', '/api/auth/invite/accept', { body: { token: acceptExtraToken, password: 'StaffPass-123' } })).status, 200);
+    assert.equal((await call('GET', `/api/auth/invite/${acceptExtraOriginal}`)).status, 410);
+    assert.equal((await call('POST', '/api/auth/invite/accept', { body: { token: acceptExtraOriginal, password: 'StaffPass-123' } })).status, 410);
+
+    const revokeBoth = await call('POST', '/api/invites', { token: A(), body: { email: 'wa.extra.revoke@test.local' } });
+    assert.equal(revokeBoth.status, 201);
+    const revokeOriginal = tokenFrom(revokeBoth.body.link);
+    await Invite.updateOne({ _id: revokeBoth.body.id, tenantId: 'lib-a' }, { $unset: { tokenCipher: 1 } });
+    const revokeShare = await call('POST', `/api/invites/${revokeBoth.body.id}/share-link`, { token: A() });
+    assert.equal(revokeShare.status, 200);
+    const revokeExtra = tokenFrom(revokeShare.body.link);
+    await call('POST', `/api/invites/${revokeBoth.body.id}/revoke`, { token: A() });
+    assert.equal((await call('GET', `/api/auth/invite/${revokeOriginal}`)).status, 410);
+    assert.equal((await call('GET', `/api/auth/invite/${revokeExtra}`)).status, 410);
+    assert.equal((await call('POST', `/api/invites/${revokeBoth.body.id}/share-link`, { token: A() })).status, 410);
+
+    const listedAfter = JSON.stringify((await call('GET', '/api/invites', { token: A() })).body);
+    assert.equal(listedAfter.includes(oldToken), false);
+    assert.equal(listedAfter.includes(extraToken), false);
+    assert.equal(listedAfter.includes(acceptExtraToken), false);
+    assert.equal(listedAfter.includes(revokeExtra), false);
+    assert.equal(listedAfter.includes('tokenCipher'), false);
+    assert.equal(listedAfter.includes('extraTokenHash'), false);
+    assert.equal(listedAfter.includes(still.extraTokenHash), false);
+    assert.equal(listedAfter.includes(still.tokenCipher), false);
 
     await call('POST', `/api/invites/${plus.body.id}/revoke`, { token: A() });
     assert.equal((await call('POST', `/api/invites/${plus.body.id}/share-link`, { token: A() })).status, 410);
