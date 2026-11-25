@@ -237,7 +237,7 @@ export const StudentManager = ({ onOpenNewStudent, selectedStudent, setSelectedS
     renewSubscription, changeSeat, extendStudentDueDate, archiveStudent,
     cancelAdmission, cancelRenewalTransaction, getValidDesksList, getAvailableEligibleSeats, 
     currentStaff, waitingList, removeFromWaitingList, updateWaitingListStatus, hasPermission, updateStudentDetails,
-    lockedStaffId, getMatchingPlans, todayStr, readOnly: isReadOnly, updatePaymentProofs, canManagePaymentProofs
+    lockedStaffId, lockedBranchId, lockedBranchIds, getMatchingPlans, todayStr, readOnly: isReadOnly, updatePaymentProofs, canManagePaymentProofs
   } = useLibrary();
   const { user, subscriptionAccess } = useAuth() || {};
   const enquiryWaiting = useWaitingEnquiryCount(isLibraryLocked(subscriptionAccess, user));
@@ -1061,7 +1061,22 @@ export const StudentManager = ({ onOpenNewStudent, selectedStudent, setSelectedS
               <option value="Pending ID Proof">Pending ID Proof</option>
             </select>
           </label>
-          {branches && branches.length > 0 && (
+          {lockedBranchId ? (
+            <label className="st-dd">
+              <span><Building2 size={13} /> Branch</span>
+              <span>{branches.find(b => b.id === lockedBranchId)?.name || 'Branch'}</span>
+            </label>
+          ) : lockedBranchIds?.length > 1 ? (
+            <label className="st-dd">
+              <span><Building2 size={13} /> Branch</span>
+              <select className="form-select" aria-label="Branch" value={activeBranchId} onChange={(e) => setActiveBranchId && setActiveBranchId(e.target.value)}>
+                {lockedBranchIds.map(id => {
+                  const b = branches.find(br => br.id === id);
+                  return <option key={id} value={id}>{b?.name || 'Branch'} ({students.filter(s => s.branchId === id).length})</option>;
+                })}
+              </select>
+            </label>
+          ) : branches && branches.length > 0 && (
             <label className="st-dd">
               <span><Building2 size={13} /> Branch</span>
               <select className="form-select" aria-label="Branch" value={activeBranchId || 'all'} onChange={(e) => setActiveBranchId && setActiveBranchId(e.target.value)}>

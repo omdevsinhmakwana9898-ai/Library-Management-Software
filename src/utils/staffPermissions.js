@@ -49,6 +49,84 @@ export const STAFF_ROLES = [
   { id: 'Custom', name: 'Custom Access', label: 'Custom Access', badgeColor: '#f59e0b', desc: 'Customized granular permission configuration' }
 ];
 
+const ALL_BRANCH_ROLES = new Set(['Admin', 'client_admin', 'owner', 'Owner']);
+const MULTI_BRANCH_ROLES = new Set(['Manager', 'Accountant']);
+const SINGLE_BRANCH_ROLES = new Set(['Librarian', 'Custom', 'staff', 'Staff']);
+
+const knownBranches = (branches = []) => (Array.isArray(branches) ? branches : []).filter(b => b && b.id);
+const asIdList = (value) => {
+  if (Array.isArray(value)) return value.map(v => String(v || '')).filter(id => id && id !== 'all');
+  if (value == null || value === '' || value === 'all') return [];
+  return [String(value)];
+};
+
+export function isAdminStaffRole(role) {
+  return ALL_BRANCH_ROLES.has(String(role || ''));
+}
+
+/** Librarian (staff): one branch, the one the record was created for. */
+export function isSingleBranchStaffRole(role) {
+  return SINGLE_BRANCH_ROLES.has(String(role || ''));
+}
+
+/** Manager and Accountant: the owner picks one or more branches. */
+export function isMultiBranchStaffRole(role) {
+  return MULTI_BRANCH_ROLES.has(String(role || ''));
+}
+
+export function isBranchScopedStaffRole(role) {
+  return isSingleBranchStaffRole(role) || isMultiBranchStaffRole(role);
+}
+
+/** Show the Add/Edit Staff branch picker only when the library has more than one branch and the role is not Admin. */
+export function showStaffBranchSelector(role, branches = []) {
+  return knownBranches(branches).length > 1 && isBranchScopedStaffRole(role);
+}
+
+/**
+ * Single branch id to store.
+ * Admin always gets 'all'. Staff/Librarian get one real branch (never All Branches when a branch exists).
+ */
+export function resolveStaffBranchId(role, branchId, branches = []) {
+  if (isAdminStaffRole(role)) return 'all';
+  const list = knownBranches(branches);
+  if (list.length === 0) return 'all';
+  if (list.length === 1) return list[0].id;
+  const id = String(branchId || '');
+  if (list.some(b => b.id === id)) return id;
+  return list[0].id;
+}
+
+/** Branches the owner assigns. Admin: []. Librarian: one id. Manager/Accountant: the selected ids (at least one). */
+export function resolveStaffBranchIds(role, branchIds, branches = [], fallbackBranchId) {
+  if (isAdminStaffRole(role)) return [];
+  const list = knownBranches(branches);
+  if (list.length === 0) return [];
+  if (list.length === 1) return [list[0].id];
+  const wanted = asIdList(branchIds).filter(id => list.some(b => b.id === id));
+  if (isSingleBranchStaffRole(role)) {
+    return [resolveStaffBranchId(role, wanted[0] || fallbackBranchId, branches)];
+  }
+  if (wanted.length) return [...new Set(wanted)];
+  const fallback = resolveStaffBranchId(role, fallbackBranchId, branches);
+  return fallback && fallback !== 'all' ? [fallback] : [list[0].id];
+}
+
+/** Assigned branches for a signed-in person. Null means all branches (Admin, or legacy unset). */
+export function staffAllowedBranchIds(staff) {
+  if (!staff || isAdminStaffRole(staff.role) || !isBranchScopedStaffRole(staff.role)) return null;
+  const fromList = asIdList(staff.branchIds);
+  const fromOne = asIdList(staff.branchId);
+  const ids = [...new Set(fromList.length ? fromList : fromOne)];
+  return ids.length ? ids : null;
+}
+
+/** One locked branch when the person may use only one. Null if they may use several or all. */
+export function staffLockedBranchId(staff) {
+  const allowed = staffAllowedBranchIds(staff);
+  return allowed && allowed.length === 1 ? allowed[0] : null;
+}
+
 // Helper to create empty permissions object
 export const createEmptyPermissions = () => {
   const perms = {};

@@ -5,6 +5,7 @@ import {
 import toast from 'react-hot-toast';
 import { useAuth } from '../auth/AuthContext';
 import { api } from '../utils/api';
+import { copyText } from '../utils/copyText';
 
 const ROLE_LABELS = { staff: 'Staff', client_admin: 'Co-admin', superadmin: 'Super Admin' };
 const roleLabel = (role) => ROLE_LABELS[role] || role || 'Staff';
@@ -33,6 +34,7 @@ export function TeamAccess() {
   const [invitesLoading, setInvitesLoading] = useState(true);
   const [invitesError, setInvitesError] = useState('');
   const [revokingId, setRevokingId] = useState(null);
+  const [sharingId, setSharingId] = useState(null);
 
   const [logsOpen, setLogsOpen] = useState(false);
   const [logs, setLogs] = useState([]);
@@ -70,6 +72,39 @@ export function TeamAccess() {
   }, [logsOpen]);
 
   if (!canManage) return null;
+
+  const recoverLink = async (invite) => {
+    const data = await api.inviteShareLink(invite.id);
+    if (!data?.link) throw new Error('Invite link was not returned.');
+    return data.link;
+  };
+
+  const handleCopyLink = async (invite) => {
+    setSharingId(invite.id);
+    try {
+      const link = await recoverLink(invite);
+      const ok = await copyText(link);
+      if (ok) toast.success('Copied');
+      else toast.error('Could not copy the link. Please select and copy it manually.');
+    } catch (err) {
+      toast.error(err.message || 'Could not copy the link.');
+    } finally {
+      setSharingId(null);
+    }
+  };
+
+  const handleShare = async (invite) => {
+    setSharingId(invite.id);
+    try {
+      const link = await recoverLink(invite);
+      const text = `You have been invited to join on My Library OS. Open this link to set your password (one-time, expires):\n${link}`;
+      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      toast.error(err.message || 'Could not open WhatsApp.');
+    } finally {
+      setSharingId(null);
+    }
+  };
 
   const handleRevoke = async (invite) => {
     setRevokingId(invite.id);
@@ -154,15 +189,35 @@ export function TeamAccess() {
                       <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{formatDate(inv.expiresAt)}</td>
                       <td style={{ textAlign: 'right' }}>
                         {status === 'pending' ? (
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            onClick={() => handleRevoke(inv)}
-                            disabled={revokingId === inv.id}
-                            style={{ fontSize: '11px', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', padding: '3px 8px', borderRadius: '6px', fontWeight: 600 }}
-                          >
-                            {revokingId === inv.id ? 'Revoking…' : 'Revoke'}
-                          </button>
+                          <div style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'flex-end' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              onClick={() => handleCopyLink(inv)}
+                              disabled={sharingId === inv.id}
+                              style={{ fontSize: '11px', padding: '3px 8px' }}
+                            >
+                              Copy link
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              onClick={() => handleShare(inv)}
+                              disabled={sharingId === inv.id}
+                              style={{ fontSize: '11px', padding: '3px 8px' }}
+                            >
+                              Share
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() => handleRevoke(inv)}
+                              disabled={revokingId === inv.id}
+                              style={{ fontSize: '11px', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', padding: '3px 8px', borderRadius: '6px', fontWeight: 600 }}
+                            >
+                              {revokingId === inv.id ? 'Revoking…' : 'Revoke'}
+                            </button>
+                          </div>
                         ) : (
                           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>—</span>
                         )}

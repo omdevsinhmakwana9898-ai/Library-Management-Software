@@ -42,7 +42,7 @@ function Subpage({ title, onBack, children }) {
 
 export function LibraryOsProfile({ screen = 'home', onScreenChange, onClose, onPaid }) {
   const { user, library, logout, subscriptionAccess } = useAuth();
-  const { settings, branches, activeBranchId, setActiveBranchId, currentStaff, hasPermission } = useLibrary();
+  const { settings, branches, activeBranchId, setActiveBranchId, lockedBranchId, lockedBranchIds, currentStaff, hasPermission } = useLibrary();
   const [dark, setDark] = useState(() => readTheme() === 'dark');
   const [langOpen, setLangOpen] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
@@ -83,7 +83,22 @@ export function LibraryOsProfile({ screen = 'home', onScreenChange, onClose, onP
             <p className="os-muted">{libraryName}</p>
           </div>
         </div>
-        {branches.length > 1 && (
+        {lockedBranchId ? (
+          <div className="os-branch">
+            <Building2 size={16} color="var(--text-secondary)" />
+            <span>{branches.find(b => b.id === lockedBranchId)?.name || 'Branch'}</span>
+          </div>
+        ) : lockedBranchIds?.length > 1 ? (
+          <div className="os-branch">
+            <Building2 size={16} color="var(--text-secondary)" />
+            <select aria-label="Branch" value={activeBranchId} onChange={e => setActiveBranchId(e.target.value)}>
+              {lockedBranchIds.map(id => {
+                const b = branches.find(br => br.id === id);
+                return <option key={id} value={id}>{b?.name || 'Branch'}</option>;
+              })}
+            </select>
+          </div>
+        ) : branches.length > 1 && (
           <div className="os-branch">
             <Building2 size={16} color="var(--text-secondary)" />
             <select aria-label="Branch" value={activeBranchId} onChange={e => setActiveBranchId(e.target.value)}>

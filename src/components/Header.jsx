@@ -34,7 +34,9 @@ export const Header = ({ activeTab, setActiveTab, onOpenNewStudent }) => {
     settings, 
     branches, 
     activeBranchId, 
-    setActiveBranchId, 
+    setActiveBranchId,
+    lockedBranchId,
+    lockedBranchIds,
     staffMembers, 
     currentStaff, 
     setCurrentStaff,
@@ -131,8 +133,27 @@ export const Header = ({ activeTab, setActiveTab, onOpenNewStudent }) => {
         {/* Right Controls: Branch Switcher, Staff Switcher, New Student CTA */}
         <div className={`header-controls ${drawerOpen ? 'drawer-open' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
           
-          {/* Branch Selector */}
-          {branches.length > 1 && (
+          {/* Branch Selector. Staff see their branch only; Manager/Accountant see only assigned branches. */}
+          {lockedBranchId ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.03)', padding: '6px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }}>
+              <Building2 size={14} color="var(--text-secondary)" />
+              <span style={{ color: 'var(--text-primary)', fontSize: '13px', fontWeight: 500 }}>{branches.find(b => b.id === lockedBranchId)?.name || 'Branch'}</span>
+            </div>
+          ) : lockedBranchIds?.length > 1 ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.03)', padding: '6px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }}>
+              <Building2 size={14} color="var(--text-secondary)" />
+              <select
+                value={activeBranchId}
+                onChange={(e) => setActiveBranchId(e.target.value)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 500, outline: 'none', cursor: 'pointer' }}
+              >
+                {lockedBranchIds.map(id => {
+                  const b = branches.find(br => br.id === id);
+                  return <option key={id} value={id}>{b?.name || 'Branch'}</option>;
+                })}
+              </select>
+            </div>
+          ) : branches.length > 1 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.03)', padding: '6px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)' }}>
               <Building2 size={14} color="var(--text-secondary)" />
               <select

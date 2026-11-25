@@ -19,7 +19,7 @@ const GoogleIcon = () => (
 const ROLE_LABELS = { staff: 'Staff', client_admin: 'Co-admin', superadmin: 'Super Admin' };
 const roleLabel = (role) => ROLE_LABELS[role] || role || 'Staff';
 
-export function LoginScreen() {
+export function LoginScreen({ existingUser = null } = {}) {
   const { loginWithPassword, completeLogin, oauthError, googleSignupPending, clearGoogleSignupPending, googleResetToken, clearGoogleResetToken } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -220,7 +220,7 @@ export function LoginScreen() {
         password: invitePassword,
         ...(inviteMobile.trim() ? { mobile: inviteMobile.trim() } : {}),
       });
-      window.history.replaceState(null, '', window.location.pathname);
+      window.history.replaceState(null, '', '/');
       completeLogin(result);
     } catch (err) {
       setError(err.message);
@@ -450,13 +450,18 @@ export function LoginScreen() {
                 <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: '0 0 16px 0' }}>
                   You've been invited to <strong>{inviteLibraryName || 'this library'}</strong> as <strong>{roleLabel(inviteInfo.role)}</strong> ({inviteInfo.email})
                 </p>
+                {existingUser && (
+                  <p id="invite-existing-session" style={{ margin: '0 0 14px 0', fontSize: '13px', color: 'var(--text-secondary)', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: '10px 12px' }}>
+                    You are signed in as {existingUser.name || existingUser.email || existingUser.mobile || 'another user'}, continue as invited user in this tab. Your other tab will stay signed in.
+                  </p>
+                )}
 
                 {googleEnabled && (
                   <>
                     <a
                       id="google-invite"
                       href={`${api.googleStartUrl()}?invite=${encodeURIComponent(inviteToken)}`}
-                      onClick={() => setRedirecting(true)}
+                      onClick={() => { try { sessionStorage.setItem('library_invite_tab', '1'); } catch { /* private mode */ } setRedirecting(true); }}
                       style={{
                         display: 'flex', width: '100%', minHeight: 44, boxSizing: 'border-box',
                         alignItems: 'center', justifyContent: 'center', gap: 10, padding: '8px 16px',

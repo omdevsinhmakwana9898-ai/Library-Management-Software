@@ -13,6 +13,9 @@ import { hashPassword, validatePassword } from './services.js';
 import { sendMail } from './mailer.js';
 import { sendMobileMessage, smsConfigured } from './messaging.js';
 import { normalizeMobile, isMobile } from './identity.js';
+import { normalizePhone } from './evolution.js';
+import { encryptSecret, decryptSecret } from './cryptoSecrets.js';
+import { sendSystemWhatsapp, systemWhatsappConfigured, systemWhatsappReady } from './systemWhatsapp.js';
 import { throttleHit } from './throttle.js';
 import { audit, AuditLog, pubAudit } from './audit.js';
 import { requireRole } from './auth.js';
@@ -56,6 +59,9 @@ const OTP_MINUTES = () => Number(process.env.OTP_EXPIRY_MINUTES || 10);
 const inviteSchema = new mongoose.Schema({
   tenantId: { type: String, required: true, index: true },
   tokenHash: { type: String, required: true, unique: true },
+  // Second hash for a Copy/Share link added to a pending invite that had no
+  // usable cipher. The original tokenHash is never replaced. Absent on new invites.
+  extraTokenHash: { type: String, unique: true, sparse: true },
   email: { type: String, lowercase: true, trim: true },
   name: String,
   role: { type: String, enum: ['staff', 'client_admin'], default: 'staff' },
@@ -64,6 +70,16 @@ const inviteSchema = new mongoose.Schema({
   expiresAt: { type: Date, required: true },
   usedAt: Date, usedBy: String, revokedAt: Date,
   createdBy: String,
+  // Encrypted raw token so an owner can copy a link again. Never returned by
+  // the list API. New invites store the original token here. Older pending
+  // invites have no cipher; the first Copy/Share stores an additional token
+  // (extraTokenHash + this cipher) and leaves tokenHash alone.
+  tokenCipher: String,
+  whatsappStatus: String,
+  whatsappReason: String,
+  phone: String,
+  branchId: String,
+  branchIds: [String],
 }, { timestamps: true });
 export const Invite = mongoose.models.Invite || mongoose.model('Invite', inviteSchema);
 
@@ -91,7 +107,56 @@ const closedInvite = (code) => {
   const key = INVITE_CLOSED[code] ? code : 'invalid';
   return { status: 410, error: INVITE_CLOSED[key], code: key };
 };
-const pubInvite = (i) => ({ id: String(i._id), email: i.email, name: i.name, role: i.role, staffId: i.staffId, expiresAt: i.expiresAt, status: inviteStatus(i), createdAt: i.createdAt });
+const pubInvite = (i) => ({
+  id: String(i._id), email: i.email, name: i.name, role: i.role, staffId: i.staffId,
+  expiresAt: i.expiresAt, status: inviteStatus(i), createdAt: i.createdAt,
+  whatsappStatus: i.whatsappStatus || null, whatsappReason: i.whatsappReason || null,
+  branchId: i.branchId || null, branchIds: Array.isArray(i.branchIds) ? i.branchIds : [],
+});
+
+function safeWhatsappReason(reason) {
+  return String(reason || '').replace(/https?:\/\/\S+/gi, '[link]').replace(/\s+/g, ' ').trim().slice(0, 160);
+}
+
+/** Plain system-WhatsApp text. The link is the same one-time invite URL as the email. */
+export function inviteWhatsappText(libraryName, link) {
+  const name = String(libraryName || 'a library').replace(/\s+/g, ' ').trim().slice(0, 120) || 'a library';
+  return `You have been invited to join ${name} on My Library OS. Open this link to set your password (one-time, expires):\n${link}`;
+}
+
+/**
+ * Best-effort system WhatsApp for a new staff invite. Never throws.
+ * Skips when there is no usable mobile or the Super Admin sender is not ready.
+ * Does not use the library's own WhatsApp instance.
+ */
+export async function deliverInviteWhatsapp({ to, libraryName, link } = {}, deps = {}) {
+  const raw = String(to || '').trim();
+  if (!raw) return { status: 'skipped', reason: 'no_number' };
+  const digits = normalizeMobile(raw);
+  const number = normalizePhone(raw);
+  if (!number || !isMobile(digits)) return { status: 'skipped', reason: 'invalid_number' };
+  const configured = deps.configured != null ? deps.configured : systemWhatsappConfigured();
+  if (!configured) return { status: 'skipped', reason: 'not_configured' };
+  let ready = false;
+  try {
+    ready = await (deps.ready || systemWhatsappReady)();
+  } catch {
+    ready = false;
+  }
+  if (!ready) return { status: 'skipped', reason: 'not_ready' };
+  try {
+    const send = deps.send || sendSystemWhatsapp;
+    const result = await send({ to: number, text: inviteWhatsappText(libraryName, link) });
+    if (result?.sent) return { status: 'sent', reason: null };
+    const reason = result?.reason || 'send_failed';
+    if (reason === 'not_configured' || reason === 'invalid_number' || reason === 'empty_text') {
+      return { status: 'skipped', reason };
+    }
+    return { status: 'failed', reason: safeWhatsappReason(reason) || 'send_failed' };
+  } catch (e) {
+    return { status: 'failed', reason: safeWhatsappReason(e?.message) || 'send_failed' };
+  }
+}
 
 /* Simple in-memory per-key rate limiter (per instance). */
 const hits = new Map();
@@ -134,6 +199,18 @@ export async function issueLinkedGooglePasswordReset(user, ip) {
 
 const mask = (email) => email.replace(/^(.)(.*)(@.*)$/, (_, a, b, c) => a + '*'.repeat(Math.min(b.length, 6)) + c);
 
+/** Match the emailed token or a later Copy/Share token on the same invite. */
+function inviteByToken(token) {
+  const hash = sha(token);
+  return { $or: [{ tokenHash: hash }, { extraTokenHash: hash }] };
+}
+
+function cipherMatchesInvite(invite, token) {
+  if (!token) return false;
+  const hash = sha(token);
+  return hash === invite.tokenHash || (!!invite.extraTokenHash && hash === invite.extraTokenHash);
+}
+
 /** Public (unauthenticated) routes. */
 /**
  * Issue #13: the one place an invite becomes an account (password or Google).
@@ -142,9 +219,9 @@ const mask = (email) => email.replace(/^(.)(.*)(@.*)$/, (_, a, b, c) => a + '*'.
  */
 export async function acceptInvite({ token, name, passwordHash, google, mobile, ip }) {
   const now = new Date();
-  const i = await Invite.findOneAndUpdate({ tokenHash: sha(token), usedAt: null, revokedAt: null, expiresAt: { $gt: now } }, { $set: { usedAt: now } }, { new: true });
+  const i = await Invite.findOneAndUpdate({ ...inviteByToken(token), usedAt: null, revokedAt: null, expiresAt: { $gt: now } }, { $set: { usedAt: now } }, { new: true });
   if (!i) {
-    const existing = await Invite.findOne({ tokenHash: sha(token) }).lean();
+    const existing = await Invite.findOne(inviteByToken(token)).lean();
     return closedInvite(existing ? inviteStatus(existing) : 'invalid');
   }
   const release = () => Invite.updateOne({ _id: i._id }, { $set: { usedAt: null } });
@@ -188,6 +265,15 @@ export async function acceptInvite({ token, name, passwordHash, google, mobile, 
     throw e;
   }
   await Invite.updateOne({ _id: i._id }, { $set: { usedBy: String(user._id) } });
+  if (i.staffId && (i.branchId || (Array.isArray(i.branchIds) && i.branchIds.length))) {
+    const set = {};
+    if (i.branchId) set.branchId = String(i.branchId);
+    if (Array.isArray(i.branchIds)) set.branchIds = i.branchIds.map(String);
+    await models.staffMembers.updateOne(
+      { tenantId: i.tenantId, _key: String(i.staffId) },
+      { $set: set },
+    );
+  }
   await audit({ user: { id: String(user._id), email: user.email, role: user.role }, ip }, 'invite.accepted', { tenantId: i.tenantId, target: i.email, detail: { via: google ? 'google' : 'password' } });
   return { user };
 }
@@ -196,7 +282,7 @@ export function createPublicAccountRouter({ issueSession }) {
   const r = express.Router();
 
   r.get('/auth/invite/:token', wrap(async (req, res) => {
-    const i = await Invite.findOne({ tokenHash: sha(req.params.token) }).lean();
+    const i = await Invite.findOne(inviteByToken(req.params.token)).lean();
     if (!i || inviteStatus(i) !== 'pending') {
       const closed = closedInvite(i ? inviteStatus(i) : 'invalid');
       return res.status(closed.status).json({ error: closed.error, code: closed.code });
@@ -352,16 +438,40 @@ export function createTenantAccountRouter() {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'A valid email is required' });
     if (await User.exists({ email })) return res.status(409).json({ error: 'This email already has an account' });
     const role = req.body?.role === 'client_admin' ? 'client_admin' : 'staff';
-    if (role === 'staff') await checkStaffLimit(req.tenantId, { Invite, excludeEmail: email }); // Issue #14
     const hours = Math.min(Math.max(Number(req.body?.expiresInHours || INVITE_HOURS()), 1), 24 * 14);
+    let permissions = req.body?.permissions;
+    let staffPhone = '';
+    let linked = null;
+    if (req.body?.staffId) {
+      linked = await models.staffMembers.findOne({ tenantId: req.tenantId, _key: String(req.body.staffId) }).lean();
+      if (linked) {
+        permissions = sanitizeStaffPermissions(permissions || linked.permissions, linked.role);
+        staffPhone = linked.phone || '';
+      }
+    }
+    const phone = String(req.body?.phone || req.body?.mobile || staffPhone || '').trim();
+    const phoneNorm = phone ? normalizeMobile(phone) : '';
+    if (phoneNorm && isMobile(phoneNorm) && await User.exists({ mobile: phoneNorm })) {
+      return res.status(409).json({ error: 'This mobile already has an account' });
+    }
+    if (role === 'staff') await checkStaffLimit(req.tenantId, { Invite, excludeEmail: email }); // Issue #14
     await Invite.updateMany({ tenantId: req.tenantId, email, usedAt: null, revokedAt: null }, { $set: { revokedAt: new Date() } }); // one live invite per email
     const token = crypto.randomBytes(32).toString('base64url');
-    let permissions = req.body?.permissions;
-    if (req.body?.staffId) {
-      const linked = await models.staffMembers.findOne({ tenantId: req.tenantId, _key: String(req.body.staffId) }).lean();
-      if (linked) permissions = sanitizeStaffPermissions(permissions || linked.permissions, linked.role);
-    }
-    const inv = await Invite.create({ tenantId: req.tenantId, tokenHash: sha(token), email, name: req.body?.name, role, staffId: req.body?.staffId, permissions, expiresAt: new Date(Date.now() + hours * 3600e3), createdBy: req.user.email });
+    const requestedBranch = req.body?.branchId != null && String(req.body.branchId).trim() !== ''
+      ? String(req.body.branchId).trim().slice(0, 80)
+      : '';
+    const branchId = requestedBranch || (linked?.branchId ? String(linked.branchId).trim().slice(0, 80) : '');
+    const requestedIds = Array.isArray(req.body?.branchIds) ? req.body.branchIds : null;
+    const branchIds = (requestedIds != null ? requestedIds : (Array.isArray(linked?.branchIds) ? linked.branchIds : []))
+      .map((id) => String(id || '').trim().slice(0, 80)).filter(Boolean);
+    const inv = await Invite.create({
+      tenantId: req.tenantId, tokenHash: sha(token), tokenCipher: encryptSecret(token),
+      email, name: req.body?.name, role, staffId: req.body?.staffId, permissions,
+      ...(phoneNorm && isMobile(phoneNorm) ? { phone: phoneNorm } : {}),
+      ...(branchId ? { branchId } : {}),
+      ...(branchIds.length ? { branchIds } : {}),
+      expiresAt: new Date(Date.now() + hours * 3600e3), createdBy: req.user.email,
+    });
     const link = inviteLink(token);
     const lib = await Library.findOne({ libraryId: req.tenantId }).lean();
     let emailed = false;
@@ -369,8 +479,37 @@ export function createTenantAccountRouter() {
       try { emailed = await sendMail({ to: email, subject: `You're invited to ${lib?.name || 'a library'} on My Library OS`, text: `You have been invited to join ${lib?.name || 'a library'} as ${role === 'staff' ? 'staff' : 'an admin'}.\n\nOpen this link to set your password (valid for ${hours} hours, one-time use):\n${link}` }); }
       catch (e) { console.error('[invite] email failed:', e.message); }
     }
-    await audit(req, 'invite.created', { target: email, detail: { role, staffId: req.body?.staffId, hours } });
-    res.status(201).json({ ...pubInvite(inv), link, emailed });
+    const whatsapp = await deliverInviteWhatsapp({ to: phone, libraryName: lib?.name, link });
+    inv.whatsappStatus = whatsapp.status;
+    inv.whatsappReason = whatsapp.reason;
+    await inv.save();
+    await audit(req, 'invite.created', { target: email, detail: { role, staffId: req.body?.staffId, hours, whatsapp: whatsapp.status, whatsappReason: whatsapp.reason } });
+    res.status(201).json({ ...pubInvite(inv), link, emailed, whatsapp });
+  }));
+
+  r.post('/invites/:id/share-link', owner, wrap(async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Not found' });
+    const i = await Invite.findOne({ _id: req.params.id, tenantId: req.tenantId });
+    if (!i) return res.status(404).json({ error: 'Not found' });
+    const status = inviteStatus(i);
+    if (status !== 'pending') return res.status(410).json({ error: closedInvite(status).error, code: status });
+    let token = '';
+    if (i.tokenCipher) {
+      try { token = decryptSecret(i.tokenCipher); } catch { token = ''; }
+      if (!cipherMatchesInvite(i, token)) token = '';
+    }
+    let added = false;
+    if (!token) {
+      // No usable cipher. Keep tokenHash and expiresAt. Add a second token
+      // so Copy/Share works and the emailed link stays valid until the same expiry.
+      token = crypto.randomBytes(32).toString('base64url');
+      i.extraTokenHash = sha(token);
+      i.tokenCipher = encryptSecret(token);
+      await i.save();
+      added = true;
+    }
+    await audit(req, 'invite.share_link', { target: i.email, detail: { rotated: false, ...(added ? { added: true } : {}) } });
+    res.json({ link: inviteLink(token) });
   }));
 
   r.post('/invites/:id/revoke', owner, wrap(async (req, res) => {

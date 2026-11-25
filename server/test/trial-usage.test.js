@@ -222,3 +222,34 @@ test('deleting the library lets the same phone sign up again without a second tr
     setSmsProvider(null);
   }
 });
+
+test('a used trial still blocks another trial, but the same email and mobile can join as staff after delete', async () => {
+  const email = 'trial.then.staff@example.com';
+  const mobile = '9876500888';
+  const first = await signup(email, { mobile });
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  assert.equal(first.body.needsPayment, false);
+  const me = (await call('GET', '/api/auth/me', { token: first.body.token })).body;
+  await deleteLibraryData(me.user.tenantId);
+  assert.equal(await User.exists({ email }), null);
+  resetRateLimits();
+  const again = await signup(email);
+  assert.equal(again.status, 200, JSON.stringify(again.body));
+  assert.equal(again.body.needsPayment, true);
+  assert.equal(again.body.message, TRIAL_USED_MESSAGE);
+  const againMe = (await call('GET', '/api/auth/me', { token: again.body.token })).body;
+  await deleteLibraryData(againMe.user.tenantId);
+  assert.equal(await User.exists({ email }), null);
+  assert.equal(await User.exists({ mobile: '9876500888' }), null);
+  const inv = await call('POST', '/api/invites', { token: ctx.tokens.b, body: { email, phone: mobile, name: 'Former Owner' } });
+  assert.equal(inv.status, 201, JSON.stringify(inv.body));
+  const token = decodeURIComponent(new URL(inv.body.link).pathname.split('/invite/')[1]);
+  const accepted = await call('POST', '/api/auth/invite/accept', { body: { token, password: 'StaffPass-123', mobile } });
+  assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
+  assert.equal(accepted.body.user.role, 'staff');
+  assert.equal(accepted.body.user.libraryId, 'lib-b');
+  const login = await call('POST', '/api/auth/login', { body: { email, password: 'StaffPass-123' } });
+  assert.equal(login.status, 200, JSON.stringify(login.body));
+  const byMobile = await call('POST', '/api/auth/login', { body: { mobile, password: 'StaffPass-123' } });
+  assert.equal(byMobile.status, 200, JSON.stringify(byMobile.body));
+});
