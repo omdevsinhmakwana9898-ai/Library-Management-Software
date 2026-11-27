@@ -41,6 +41,9 @@ export const STATUS_PRESENTATION = {
   public: { label: 'Public', badge: 'badge-open' },
   hidden: { label: 'Hidden', badge: 'badge-disabled' },
   outstanding: { label: 'Outstanding', badge: 'badge-pending' },
+  earned: { label: 'Earned', badge: 'badge-paid' },
+  reversed: { label: 'Reversed', badge: 'badge-refunded' },
+  unpaid: { label: 'Unpaid', badge: 'badge-pending' },
 };
 
 export function statusLabel(status) {
