@@ -18,6 +18,10 @@ test('insights directory is searchable and opens details instead of the owner wo
   assert.match(directory, /Last Activity/);
   assert.match(directory, /Active\/Total Students/);
   assert.match(directory, /sa-library-search/);
+  assert.match(directory, /sa-library-filters-button/);
+  assert.match(directory, /sa-library-filters-menu/);
+  assert.match(directory, /FiltersMenu/);
+  assert.doesNotMatch(directory, /gridTemplateColumns: 'repeat\(auto-fit, minmax\(150px, 1fr\)\)'/);
   assert.match(directory, /Expiring soon/);
   assert.match(directory, /adminLibraryDirectory/);
   assert.match(dash, /setInsightNav\(\{ page: 'details'/);
@@ -68,5 +72,9 @@ test('per-library analytics is where customer fees and seat use are shown', () =
   assert.match(analytics, /Popular membership plans/);
   assert.match(analytics, /libraryId/);
   assert.match(analytics, /export\.csv/);
+  assert.match(analytics, /sa-analytics-filters-button/);
+  assert.match(analytics, /sa-analytics-filters-menu/);
+  assert.match(analytics, /<span>CSV<\/span>/);
+  assert.doesNotMatch(analytics, /gridTemplateColumns: 'repeat\(auto-fit, minmax\(140px, 1fr\)\)'/);
   assert.match(dash, /page: 'analytics'/);
 });

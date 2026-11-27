@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Download, Lock, Filter, ArrowLeft } from 'lucide-react';
+import { Download, Lock, ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, downloadFile } from '../utils/api';
+import { FiltersMenu } from './FiltersMenu';
 
 const inr = (n) => `₹${Math.round(Number(n || 0)).toLocaleString('en-IN')}`;
 const Stat = ({ label, value, sub }) => (
@@ -51,9 +52,13 @@ export function PlatformInsightsOverview() {
   );
 }
 
+const blankAnalytics = { from: '', to: '', branchId: '', sectionId: '' };
+const stackLabel = { margin: 0, display: 'flex', flexDirection: 'column', gap: 4 };
+
 /** One library’s operational analytics. Customer fees stay in this view. */
 export function LibraryAnalytics({ libraryId, libraryName, onBack }) {
-  const [f, setF] = useState({ from: '', to: '', branchId: '', sectionId: '' });
+  const [applied, setApplied] = useState(blankAnalytics);
+  const [draft, setDraft] = useState(blankAnalytics);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const qs = (o) => {
@@ -68,14 +73,28 @@ export function LibraryAnalytics({ libraryId, libraryName, onBack }) {
     setLoading(true);
     try { setData(await api.adminInsights(qs(filters))); } catch (e) { toast.error(e.message); } finally { setLoading(false); }
   }, [libraryId]);
-  useEffect(() => { load(f); }, [load]); // eslint-disable-line react-hooks/exhaustive-deps
-  const set = (k) => (e) => setF(x => ({ ...x, [k]: e.target.value, ...(k === 'branchId' ? { sectionId: '' } : {}) }));
+  const [prevLibraryId, setPrevLibraryId] = useState(libraryId);
+  if (libraryId !== prevLibraryId) {
+    setPrevLibraryId(libraryId);
+    setApplied(blankAnalytics);
+    setDraft(blankAnalytics);
+  }
+  useEffect(() => { load(applied); }, [load, applied]);
+  useEffect(() => { setDraft(applied); }, [applied]);
+  const set = (k) => (e) => setDraft(x => ({ ...x, [k]: e.target.value, ...(k === 'branchId' ? { sectionId: '' } : {}) }));
+  const commit = (next) => { setDraft(next); setApplied(next); };
   const t = data?.totals;
   const row = data?.perLibrary?.[0];
   const name = row?.name || libraryName || libraryId;
   const branches = (data?.catalog?.branches || []).filter(b => b.libraryId === libraryId);
-  const sections = (data?.catalog?.sections || []).filter(s => s.libraryId === libraryId && (!f.branchId || s.branchId === f.branchId));
-  const branchName = branches.find(b => b.branchId === (data?.filters?.branchId || f.branchId))?.name;
+  const sections = (data?.catalog?.sections || []).filter(s => s.libraryId === libraryId && (!draft.branchId || s.branchId === draft.branchId));
+  const branchName = branches.find(b => b.branchId === applied.branchId)?.name || applied.branchId;
+  const sectionName = (data?.catalog?.sections || []).find(s => s.sectionId === applied.sectionId)?.name || applied.sectionId;
+  const chips = [
+    (applied.from || applied.to) && { key: 'period', label: `${applied.from || '…'} – ${applied.to || '…'}`, onDismiss: () => commit({ ...applied, from: '', to: '' }) },
+    applied.branchId && { key: 'branch', label: branchName, onDismiss: () => commit({ ...applied, branchId: '', sectionId: '' }) },
+    applied.sectionId && { key: 'section', label: sectionName, onDismiss: () => commit({ ...applied, sectionId: '' }) },
+  ].filter(Boolean);
   const period = `${data?.filters?.from || 'all time'} → ${data?.filters?.to || 'today'}`;
   return (
     <div id="sa-library-analytics" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
@@ -90,26 +109,35 @@ export function LibraryAnalytics({ libraryId, libraryName, onBack }) {
         <Lock size={16} style={{ flexShrink: 0, marginTop: 1 }} />
         <span>{data?.privacy || 'Aggregated statistics only. Access is logged.'} Customer fee collections on this page are this library’s own money and are kept separate from software revenue.</span>
       </div>
-      <form className="premium-card" onSubmit={(e) => { e.preventDefault(); load(f); }} style={{ padding: 12, display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', alignItems: 'end' }}>
-        <label className="form-label" style={{ margin: 0 }}>From<input className="form-input" type="date" value={f.from} onChange={set('from')} /></label>
-        <label className="form-label" style={{ margin: 0 }}>To<input className="form-input" type="date" value={f.to} onChange={set('to')} /></label>
-        <label className="form-label" style={{ margin: 0 }}>Branch
-          <select className="form-input" value={f.branchId} onChange={set('branchId')}>
-            <option value="">All branches</option>
-            {branches.map(b => <option key={b.branchId} value={b.branchId}>{b.name}</option>)}
-          </select>
-        </label>
-        <label className="form-label" style={{ margin: 0 }}>Section
-          <select className="form-input" value={f.sectionId} onChange={set('sectionId')}>
-            <option value="">All sections</option>
-            {sections.map(s => <option key={s.sectionId} value={s.sectionId}>{s.name}</option>)}
-          </select>
-        </label>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn btn-primary btn-sm" type="submit" disabled={loading}><Filter size={14} /> <span>Apply</span></button>
-          <button className="btn btn-secondary btn-sm" type="button" onClick={() => downloadFile(`/admin/insights/export.csv${qs(f)}`, `library-insights-${libraryId}.csv`).catch(e => toast.error(e.message))}><Download size={14} /> <span>CSV</span></button>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
+        <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+          <FiltersMenu
+            buttonId="sa-analytics-filters-button"
+            menuId="sa-analytics-filters-menu"
+            chips={chips}
+            onApply={(e) => { e?.preventDefault(); setApplied({ ...draft }); }}
+            onReset={() => commit(blankAnalytics)}
+            onClose={() => setDraft(applied)}
+            applyDisabled={loading}
+          >
+            <label className="form-label" style={stackLabel}>From<input className="form-input" type="date" value={draft.from} onChange={set('from')} /></label>
+            <label className="form-label" style={stackLabel}>To<input className="form-input" type="date" value={draft.to} onChange={set('to')} /></label>
+            <label className="form-label" style={stackLabel}>Branch
+              <select className="form-input" value={draft.branchId} onChange={set('branchId')}>
+                <option value="">All branches</option>
+                {branches.map(b => <option key={b.branchId} value={b.branchId}>{b.name}</option>)}
+              </select>
+            </label>
+            <label className="form-label" style={stackLabel}>Section
+              <select className="form-input" value={draft.sectionId} onChange={set('sectionId')}>
+                <option value="">All sections</option>
+                {sections.map(s => <option key={s.sectionId} value={s.sectionId}>{s.name}</option>)}
+              </select>
+            </label>
+          </FiltersMenu>
         </div>
-      </form>
+        <button className="btn btn-secondary btn-sm" type="button" onClick={() => downloadFile(`/admin/insights/export.csv${qs(applied)}`, `library-insights-${libraryId}.csv`).catch(e => toast.error(e.message))}><Download size={14} /> <span>CSV</span></button>
+      </div>
       {t && (
         <>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
