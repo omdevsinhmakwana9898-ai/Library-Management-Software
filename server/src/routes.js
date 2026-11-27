@@ -377,7 +377,8 @@ admin.patch('/libraries/:libraryId', wrap(async (req, res) => {
     if (req.body.planId && !(await SoftwarePlan.exists({ planId: req.body.planId }))) return res.status(400).json({ error: 'Unknown plan' });
     set.planId = req.body.planId || null;
   }
-  await audit(req, 'library.update', { tenantId: req.params.libraryId, target: req.params.libraryId, detail: set });
+  const reason = typeof req.body?.reason === 'string' && req.body.reason.trim() ? req.body.reason.trim().slice(0, 500) : undefined;
+  await audit(req, 'library.update', { tenantId: req.params.libraryId, target: req.params.libraryId, reason, detail: set });
   const lib = await Library.findOneAndUpdate({ libraryId: req.params.libraryId }, { $set: set }, { new: true, lean: true });
   lib ? res.json({ libraryId: lib.libraryId, name: lib.name, status: lib.status }) : res.status(404).json({ error: 'Library not found' });
 }));

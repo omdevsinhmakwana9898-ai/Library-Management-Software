@@ -1339,6 +1339,19 @@ body {
 }
 .sa-nav-card strong { font-size: 16px; }
 .sa-nav-card span { font-size: 13px; color: var(--text-secondary); line-height: 1.4; }
+.sa-sort-bar { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.sa-sort-bar .btn { white-space: normal; text-align: left; }
+.sa-action-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.sa-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+.sa-note svg { flex-shrink: 0; margin-top: 1px; }
 @media (max-width: 420px) {
   .sa-page-header { flex-direction: column; }
   .sa-list-row { flex-direction: column; }

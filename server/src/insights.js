@@ -16,6 +16,7 @@ import { audit } from './audit.js';
 import { todayIn } from './finance.js';
 import { SoftwarePlan } from './plans.js';
 import { currentMonthSoftwareCollection } from './businessCollections.js';
+import { libraryDirectory, libraryDetails } from './libraryDirectory.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const kpiProviders = [];
@@ -72,29 +73,67 @@ export async function saasSummary() {
   };
 }
 
+/** Platform Insights header: library and student counts only. Customer money stays on per-library analytics. */
+export async function insightsOverview() {
+  const libs = await Library.find().select('libraryId status').lean();
+  const ids = libs.map(l => l.libraryId);
+  const rows = ids.length
+    ? await models.students.aggregate([
+      { $match: { tenantId: { $in: ids } } },
+      { $group: { _id: null, total: { $sum: 1 }, active: { $sum: { $cond: [{ $in: ['$status', ACTIVE] }, 1, 0] } } } },
+    ])
+    : [];
+  return {
+    totals: {
+      libraries: libs.length,
+      librariesActive: libs.filter(l => l.status === 'Active').length,
+      studentsActive: rows[0]?.active || 0,
+      studentsTotal: rows[0]?.total || 0,
+    },
+    privacy: 'Aggregated statistics only. No student names, phone numbers or documents are included. Access is logged.',
+    note: 'Customer fee collections, expenses, net profit and seat utilization are on each library’s own analytics. Those customer amounts are separate from software revenue.',
+  };
+}
+
+async function libraryListExtras(ids) {
+  const extra = {};
+  for (const fn of listDecorators) {
+    try {
+      for (const [id, v] of Object.entries(await fn(ids) || {})) extra[id] = { ...(extra[id] || {}), ...v };
+    } catch (e) { console.error('[library-directory]', e.message); }
+  }
+  return extra;
+}
+
 /** Aggregated customer analytics. No names/phones; per-library rows contain counts and sums only. */
-export async function libraryInsights({ from, to, libraryId, city, planId } = {}) {
+export async function libraryInsights({ from, to, libraryId, city, planId, branchId, sectionId } = {}) {
   let libs = await Library.find().lean();
   if (libraryId) libs = libs.filter(l => l.libraryId === libraryId);
   if (city) libs = libs.filter(l => (l.city || '').toLowerCase() === String(city).toLowerCase());
   const ids = libs.map(l => l.libraryId);
   const base = { tenantId: { $in: ids } };
+  const branch = branchId ? { branchId: String(branchId) } : {};
+  const section = sectionId ? { sectionId: String(sectionId) } : {};
   const dateRange = {};
   if (isDate(from)) dateRange.$gte = from;
   if (isDate(to)) dateRange.$lte = to;
   const dated = Object.keys(dateRange).length ? { date: dateRange } : {};
-  const stuMatch = planId ? { ...base, planId: String(planId) } : base;
-  const [students, seats, occupied, pays, exps, plans, growth, branchPays, planNames] = await Promise.all([
+  const stuMatch = { ...(planId ? { ...base, planId: String(planId) } : base), ...branch, ...section };
+  const seatMatch = { ...base, ...branch, ...section };
+  const moneyMatch = { ...base, ...dated, ...branch };
+  const [students, seats, occupied, pays, exps, plans, growth, branchPays, planNames, branchDocs, sectionDocs] = await Promise.all([
     models.students.aggregate([{ $match: stuMatch }, { $group: { _id: '$tenantId', total: { $sum: 1 }, active: { $sum: { $cond: [{ $in: ['$status', ACTIVE] }, 1, 0] } } } }]),
-    models.seats.aggregate([{ $match: base }, { $group: { _id: '$tenantId', total: { $sum: 1 } } }]),
-    models.students.aggregate([{ $match: { ...base, status: { $in: ACTIVE }, seatNo: { $nin: [null, '', 'Non-Fixed Seat'] } } },
+    models.seats.aggregate([{ $match: seatMatch }, { $group: { _id: '$tenantId', total: { $sum: 1 } } }]),
+    models.students.aggregate([{ $match: { ...seatMatch, status: { $in: ACTIVE }, seatNo: { $nin: [null, '', 'Non-Fixed Seat'] } } },
       { $group: { _id: { t: '$tenantId', b: '$branchId', s: '$sectionId', n: '$seatNo' } } }, { $group: { _id: '$_id.t', n: { $sum: 1 } } }]),
-    models.payments.aggregate([{ $match: { ...base, ...dated } }, { $group: { _id: '$tenantId', count: { $sum: 1 }, total: { $sum: num({ $ifNull: ['$netTotal', '$amount'] }) } } }]),
-    models.expenses.aggregate([{ $match: { ...base, ...dated } }, { $group: { _id: '$tenantId', total: { $sum: num('$amount') } } }]),
-    models.students.aggregate([{ $match: { ...base, planId: { $nin: [null, ''] } } }, { $group: { _id: { t: '$tenantId', p: '$planId', name: '$planName' }, n: { $sum: 1 } } }]),
-    models.payments.aggregate([{ $match: { ...base, ...dated, date: { ...(dated.date || {}), $type: 'string' } } }, { $group: { _id: { $substrBytes: ['$date', 0, 7] }, collections: { $sum: num({ $ifNull: ['$netTotal', '$amount'] }) }, payments: { $sum: 1 } } }, { $sort: { _id: 1 } }]),
-    models.payments.aggregate([{ $match: { ...base, ...dated } }, { $group: { _id: { t: '$tenantId', b: '$branchId' }, total: { $sum: num({ $ifNull: ['$netTotal', '$amount'] }) } } }]),
-    models.plans.find(base).select('tenantId _key name').lean(),
+    models.payments.aggregate([{ $match: moneyMatch }, { $group: { _id: '$tenantId', count: { $sum: 1 }, total: { $sum: num({ $ifNull: ['$netTotal', '$amount'] }) } } }]),
+    models.expenses.aggregate([{ $match: moneyMatch }, { $group: { _id: '$tenantId', total: { $sum: num('$amount') } } }]),
+    models.students.aggregate([{ $match: { ...base, ...branch, ...section, planId: { $nin: [null, ''] } } }, { $group: { _id: { t: '$tenantId', p: '$planId', name: '$planName' }, n: { $sum: 1 } } }]),
+    models.payments.aggregate([{ $match: { ...moneyMatch, date: { ...(dated.date || {}), $type: 'string' } } }, { $group: { _id: { $substrBytes: ['$date', 0, 7] }, collections: { $sum: num({ $ifNull: ['$netTotal', '$amount'] }) }, payments: { $sum: 1 } } }, { $sort: { _id: 1 } }]),
+    models.payments.aggregate([{ $match: moneyMatch }, { $group: { _id: { t: '$tenantId', b: '$branchId' }, total: { $sum: num({ $ifNull: ['$netTotal', '$amount'] }) } } }]),
+    models.plans.find({ ...base, ...branch }).select('tenantId _key name').lean(),
+    models.branches.find(base).select('tenantId _key name').lean(),
+    models.sections.find(base).select('tenantId _key name branchId').lean(),
   ]);
   const by = (arr) => Object.fromEntries(arr.map(r => [r._id, r]));
   const S = by(students), SE = by(seats), O = by(occupied), P = by(pays), E = by(exps);
@@ -115,7 +154,7 @@ export async function libraryInsights({ from, to, libraryId, city, planId } = {}
   const cities = {};
   for (const r of perLibrary) { const c = r.city || 'Unknown'; (cities[c] ||= { city: c, libraries: 0, studentsActive: 0, collections: 0 }); cities[c].libraries++; cities[c].studentsActive += r.studentsActive; cities[c].collections += r.collections; }
   return {
-    filters: { from: dateRange.$gte || null, to: dateRange.$lte || null, libraryId: libraryId || null, city: city || null, planId: planId || null },
+    filters: { from: dateRange.$gte || null, to: dateRange.$lte || null, libraryId: libraryId || null, city: city || null, planId: planId || null, branchId: branchId || null, sectionId: sectionId || null },
     totals: { libraries: libs.length, studentsTotal: sum('studentsTotal'), studentsActive: sum('studentsActive'), seatsTotal, seatsOccupied,
       seatUtilization: seatsTotal ? Math.round((seatsOccupied / seatsTotal) * 100) : null, payments: sum('payments'),
       customerFeeCollections: sum('collections'), customerExpenses: sum('expenses'), customerNet: sum('collections') - sum('expenses') },
@@ -123,6 +162,10 @@ export async function libraryInsights({ from, to, libraryId, city, planId } = {}
     popularPlans: Object.entries(popular).map(([name, students]) => ({ name, students })).sort((a, b) => b.students - a.students).slice(0, 10),
     cities: Object.values(cities).sort((a, b) => b.studentsActive - a.studentsActive),
     branches: branchPays.map(b => ({ libraryId: b._id.t, branchId: b._id.b || null, collections: Math.round(b.total) })),
+    catalog: {
+      branches: branchDocs.map(b => ({ libraryId: b.tenantId, branchId: b._key, name: b.name || b._key })),
+      sections: sectionDocs.map(s => ({ libraryId: s.tenantId, sectionId: s._key, branchId: s.branchId || null, name: s.name || s._key })),
+    },
     perLibrary,
     privacy: 'Aggregated statistics only. No student names, phone numbers or documents are included. Access is logged.',
   };
@@ -133,8 +176,31 @@ export const toCsv = (rows, cols) => [cols.map(c => c.label).join(','), ...rows.
 
 export function createInsightsRouter() {
   const r = express.Router();
-  const filters = (q) => ({ from: q.from, to: q.to, libraryId: q.libraryId ? String(q.libraryId) : undefined, city: q.city ? String(q.city) : undefined, planId: q.planId ? String(q.planId) : undefined });
+  const filters = (q) => ({
+    from: q.from, to: q.to,
+    libraryId: q.libraryId ? String(q.libraryId) : undefined,
+    city: q.city ? String(q.city) : undefined,
+    planId: q.planId ? String(q.planId) : undefined,
+    branchId: q.branchId ? String(q.branchId) : undefined,
+    sectionId: q.sectionId ? String(q.sectionId) : undefined,
+  });
   r.get('/saas-summary', wrap(async (_req, res) => res.json(await saasSummary())));
+  r.get('/insights/overview', wrap(async (req, res) => {
+    await audit(req, 'insights.overview', { target: 'library-insights-overview' });
+    res.json(await insightsOverview());
+  }));
+  r.get('/library-directory', wrap(async (req, res) => {
+    const q = req.query || {};
+    await audit(req, 'library.directory.view', { target: 'library-directory', detail: { q: q.q || null, city: q.city || null, plan: q.plan || null, subscription: q.subscription || null, account: q.account || null, page: q.page || 1 } });
+    res.json(await libraryDirectory(q, { loadExtras: libraryListExtras }));
+  }));
+  r.get('/library-directory/:libraryId', wrap(async (req, res) => {
+    const libraryId = String(req.params.libraryId);
+    const row = await libraryDetails(libraryId, { loadExtras: libraryListExtras });
+    if (!row) return res.status(404).json({ error: 'Library not found' });
+    await audit(req, 'library.details.view', { tenantId: libraryId, target: libraryId });
+    res.json(row);
+  }));
   r.get('/insights', wrap(async (req, res) => {
     const f = filters(req.query);
     await audit(req, 'insights.view', { tenantId: f.libraryId || null, target: 'library-insights', detail: f });
