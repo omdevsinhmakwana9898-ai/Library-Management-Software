@@ -18,12 +18,6 @@ const qs = (o) => {
   return s ? `?${s}` : '';
 };
 
-function Choice({ label, pressed, onClick }) {
-  return (
-    <button type="button" className={`btn btn-sm ${pressed ? 'btn-primary' : 'btn-secondary'}`} style={{ justifyContent: 'flex-start', width: '100%' }} aria-pressed={pressed} onClick={onClick}>{label}</button>
-  );
-}
-
 export function LibraryPlans({ onOpen }) {
   const [query, setQuery] = useState(empty);
   const [draft, setDraft] = useState(empty);
@@ -117,44 +111,56 @@ export function LibraryPlans({ onOpen }) {
               {(data?.plans || []).map(p => <option key={p.planId} value={p.planId}>{p.name}</option>)}
             </select>
           </label>
-          <div role="group" aria-label="Subscription" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span className="form-label">Subscription</span>
-            {[['', 'Any subscription'], ['active', 'Active'], ['trial', 'Trial'], ['expiring', 'Expiring soon'], ['expired', 'Expired'], ['cancelled', 'Cancelled']].map(([id, label]) => (
-              <Choice key={id || 'any-sub'} label={label} pressed={draft.subscription === id} onClick={() => setDraft(d => ({ ...d, subscription: id }))} />
-            ))}
-          </div>
-          <div role="group" aria-label="Account" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span className="form-label">Account</span>
-            {[['', 'Enabled and disabled'], ['enabled', 'Enabled'], ['disabled', 'Disabled']].map(([id, label]) => (
-              <Choice key={id || 'any-account'} label={label} pressed={draft.account === id} onClick={() => setDraft(d => ({ ...d, account: id }))} />
-            ))}
-          </div>
-          <div role="group" aria-label="Renewal" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span className="form-label">Renewal</span>
-            <Choice label="Any renewal" pressed={!draft.renewal} onClick={() => setDraft(d => ({ ...d, renewal: '' }))} />
-            <Choice label="Renewal outstanding" pressed={draft.renewal === 'outstanding'} onClick={() => setDraft(d => ({ ...d, renewal: 'outstanding' }))} />
-          </div>
-          <div role="group" aria-label="Expiry" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span className="form-label">Expiry</span>
-            {[['', 'Any expiry'], ['7d', 'Expires within 7 days'], ['30d', 'Expires within 30 days'], ['90d', 'Expires within 90 days'], ['expired', 'Already expired'], ['none', 'No expiry date'], ['range', 'Custom range'], ['months', 'Expired for N months']].map(([id, label]) => (
-              <Choice key={id || 'any-expiry'} label={label} pressed={expiryMode === id} onClick={() => pickExpiry(id)} />
-            ))}
-            {expiryMode === 'range' && (
-              <>
-                <label className="form-label" style={field}>From
-                  <input className="form-input" type="date" value={draft.expiryFrom} onChange={e => setDraft(d => ({ ...d, expiryFrom: e.target.value, expiredMonths: '', expiry: '' }))} />
-                </label>
-                <label className="form-label" style={field}>To
-                  <input className="form-input" type="date" value={draft.expiryTo} onChange={e => setDraft(d => ({ ...d, expiryTo: e.target.value, expiredMonths: '', expiry: '' }))} />
-                </label>
-              </>
-            )}
-            {expiryMode === 'months' && (
-              <label className="form-label" style={field}>Months
-                <input className="form-input" type="number" min={1} max={120} value={draft.expiredMonths} onChange={e => setDraft(d => ({ ...d, expiredMonths: e.target.value, expiryFrom: '', expiryTo: '', expiry: '' }))} />
+          <label className="form-label" htmlFor="sa-library-plans-subscription" style={field}>Subscription
+            <select id="sa-library-plans-subscription" className="form-select" value={draft.subscription} onChange={e => setDraft(d => ({ ...d, subscription: e.target.value }))}>
+              <option value="">Any subscription</option>
+              <option value="active">Active</option>
+              <option value="trial">Trial</option>
+              <option value="expiring">Expiring soon</option>
+              <option value="expired">Expired</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </label>
+          <label className="form-label" htmlFor="sa-library-plans-account" style={field}>Account
+            <select id="sa-library-plans-account" className="form-select" value={draft.account} onChange={e => setDraft(d => ({ ...d, account: e.target.value }))}>
+              <option value="">Enabled and disabled</option>
+              <option value="enabled">Enabled</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </label>
+          <label className="form-label" htmlFor="sa-library-plans-renewal" style={field}>Renewal
+            <select id="sa-library-plans-renewal" className="form-select" value={draft.renewal} onChange={e => setDraft(d => ({ ...d, renewal: e.target.value }))}>
+              <option value="">Any renewal</option>
+              <option value="outstanding">Renewal outstanding</option>
+            </select>
+          </label>
+          <label className="form-label" htmlFor="sa-library-plans-expiry" style={field}>Expiry
+            <select id="sa-library-plans-expiry" className="form-select" value={expiryMode} onChange={e => pickExpiry(e.target.value)}>
+              <option value="">Any expiry</option>
+              <option value="7d">Expires within 7 days</option>
+              <option value="30d">Expires within 30 days</option>
+              <option value="90d">Expires within 90 days</option>
+              <option value="expired">Already expired</option>
+              <option value="none">No expiry date</option>
+              <option value="range">Custom range</option>
+              <option value="months">Expired for N months</option>
+            </select>
+          </label>
+          {expiryMode === 'range' && (
+            <>
+              <label className="form-label" style={field}>From
+                <input className="form-input" type="date" value={draft.expiryFrom} onChange={e => setDraft(d => ({ ...d, expiryFrom: e.target.value, expiredMonths: '', expiry: '' }))} />
               </label>
-            )}
-          </div>
+              <label className="form-label" style={field}>To
+                <input className="form-input" type="date" value={draft.expiryTo} onChange={e => setDraft(d => ({ ...d, expiryTo: e.target.value, expiredMonths: '', expiry: '' }))} />
+              </label>
+            </>
+          )}
+          {expiryMode === 'months' && (
+            <label className="form-label" style={field}>Months
+              <input className="form-input" type="number" min={1} max={120} value={draft.expiredMonths} onChange={e => setDraft(d => ({ ...d, expiredMonths: e.target.value, expiryFrom: '', expiryTo: '', expiry: '' }))} />
+            </label>
+          )}
         </FiltersMenu>
         {data?.renewalRule && <p style={{ margin: 0, fontSize: 12, color: 'var(--text-tertiary)' }}>{data.renewalRule}</p>}
       </div>

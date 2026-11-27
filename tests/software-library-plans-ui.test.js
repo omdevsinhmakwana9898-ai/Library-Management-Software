@@ -18,6 +18,10 @@ test('software catalog and library plans are separate super admin pages', () => 
   assert.match(catalog, /sa-software-plans-filters-button/);
   assert.match(catalog, /sa-software-plans-filters-menu/);
   assert.match(catalog, /FiltersMenu/);
+  assert.match(catalog, /sa-software-plans-status/);
+  assert.match(catalog, /sa-software-plans-visibility/);
+  assert.match(catalog, /className="form-select"/);
+  assert.doesNotMatch(catalog, /aria-pressed/);
   assert.match(catalog, /WhatsApp/);
   assert.match(catalog, /Seat capacity/);
   assert.match(catalog, /confirmArchive/);
@@ -27,6 +31,13 @@ test('software catalog and library plans are separate super admin pages', () => 
   assert.match(plans, /sa-library-plans-filters-menu/);
   assert.match(plans, /sa-library-plans-search/);
   assert.match(plans, /FiltersMenu/);
+  assert.match(plans, /sa-library-plans-subscription/);
+  assert.match(plans, /sa-library-plans-account/);
+  assert.match(plans, /sa-library-plans-renewal/);
+  assert.match(plans, /sa-library-plans-expiry/);
+  assert.match(plans, /className="form-select"/);
+  assert.doesNotMatch(plans, /aria-pressed/);
+  assert.match(plans, /expiryMode === 'range'/);
   assert.match(plans, /Renewal outstanding/);
   assert.match(plans, /Expired for N months/);
   assert.match(plans, /Account/);

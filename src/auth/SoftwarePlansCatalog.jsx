@@ -149,16 +149,20 @@ export function SoftwarePlansCatalog({ onChanged }) {
           onReset={() => { setDraft(emptyFilters); setFilters(emptyFilters); }}
           onClose={() => setDraft(filters)}
         >
-          <div role="group" aria-label="Plan status" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {[['all', 'All plans'], ['active', 'Active'], ['archived', 'Archived']].map(([id, label]) => (
-              <button key={id} type="button" className={`btn btn-sm ${draft.status === id ? 'btn-primary' : 'btn-secondary'}`} style={{ justifyContent: 'flex-start', width: '100%' }} aria-pressed={draft.status === id} onClick={() => setDraft(d => ({ ...d, status: id }))}>{label}</button>
-            ))}
-          </div>
-          <div role="group" aria-label="Public visibility" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {[['all', 'Any visibility'], ['public', 'Public on signup'], ['hidden', 'Hidden from signup']].map(([id, label]) => (
-              <button key={id} type="button" className={`btn btn-sm ${draft.visibility === id ? 'btn-primary' : 'btn-secondary'}`} style={{ justifyContent: 'flex-start', width: '100%' }} aria-pressed={draft.visibility === id} onClick={() => setDraft(d => ({ ...d, visibility: id }))}>{label}</button>
-            ))}
-          </div>
+          <label className="form-label" htmlFor="sa-software-plans-status" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>Status
+            <select id="sa-software-plans-status" className="form-select" value={draft.status} onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}>
+              <option value="all">All plans</option>
+              <option value="active">Active</option>
+              <option value="archived">Archived</option>
+            </select>
+          </label>
+          <label className="form-label" htmlFor="sa-software-plans-visibility" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>Visibility
+            <select id="sa-software-plans-visibility" className="form-select" value={draft.visibility} onChange={e => setDraft(d => ({ ...d, visibility: e.target.value }))}>
+              <option value="all">Any visibility</option>
+              <option value="public">Public on signup</option>
+              <option value="hidden">Hidden from signup</option>
+            </select>
+          </label>
         </FiltersMenu>
         {shown.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 12 }}>No plans match these filters.</p>}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 260px), 1fr))', gap: 12, marginTop: 12 }}>
