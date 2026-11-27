@@ -22,7 +22,8 @@ import {
 
 export const BILLING_PRESETS = [
   'today', 'last_2_days', 'last_7_days', 'this_month', 'last_month',
-  'last_2_months', 'last_3_months', 'last_6_months', 'last_1_year', 'all_time', 'custom',
+  'last_2_months', 'last_3_months', 'last_6_months', 'last_1_year', 'last_3_years',
+  'all_time', 'custom',
 ];
 
 /** UI label → invoice statuses. Refunded has none. Void is only in the unfiltered list. */

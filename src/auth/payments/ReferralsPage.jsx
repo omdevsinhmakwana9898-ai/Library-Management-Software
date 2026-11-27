@@ -104,11 +104,13 @@ export function ReferralsPage({ onOpen }) {
         <label className="form-label" style={{ margin: 0 }}>Search
           <input className="form-input" value={draft.q} onChange={e => setDraft(d => ({ ...d, q: e.target.value }))} placeholder="Campaign, library, code, invoice" />
         </label>
-        <div role="group" aria-label="Campaign state" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {[['', 'All campaigns'], ['true', 'Active campaigns'], ['false', 'Inactive campaigns']].map(([id, label]) => (
-            <button key={id || 'all'} type="button" className={`btn btn-sm ${draft.active === id ? 'btn-primary' : 'btn-secondary'}`} style={{ justifyContent: 'flex-start', width: '100%' }} aria-pressed={draft.active === id} onClick={() => setDraft(d => ({ ...d, active: id }))}>{label}</button>
-          ))}
-        </div>
+        <label className="form-label" htmlFor="sa-referrals-active" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>Campaign
+          <select id="sa-referrals-active" className="form-select" value={draft.active} onChange={e => setDraft(d => ({ ...d, active: e.target.value }))}>
+            <option value="">All campaigns</option>
+            <option value="true">Active campaigns</option>
+            <option value="false">Inactive campaigns</option>
+          </select>
+        </label>
         <label className="form-label" style={{ margin: 0 }}>Referral history status
           <select className="form-input" value={draft.status} onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}>
             <option value="">All</option>

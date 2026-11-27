@@ -34,10 +34,20 @@ test('payments landing links to dedicated super admin pages', () => {
     assert.match(file, new RegExp(menu));
     assert.match(file, /FiltersMenu/);
   }
-  assert.match(history, /Today/);
-  assert.match(history, /2 days/);
-  assert.match(history, /Last 7 days/);
+  assert.match(history, /DatePeriodSelect/);
+  assert.match(history, /sa-billing-history-filters-period/);
+  assert.match(history, /preset: 'all_time'/);
+  assert.doesNotMatch(history, /\['today', 'Today'\]/);
+  assert.doesNotMatch(history, /\['last_2_days', '2 days'\]/);
+  assert.doesNotMatch(history, /aria-pressed/);
+  assert.match(history, /sa-billing-history-status/);
   assert.match(history, /Refunded/);
+  assert.match(offers, /sa-offers-status/);
+  assert.doesNotMatch(offers, /aria-pressed/);
+  assert.match(referrals, /sa-referrals-active/);
+  assert.doesNotMatch(referrals, /aria-pressed/);
+  assert.match(deletion, /sa-deletion-requests-state/);
+  assert.doesNotMatch(deletion, /aria-pressed/);
 });
 
 test('provider secrets stay masked and live mode asks before it is saved', () => {

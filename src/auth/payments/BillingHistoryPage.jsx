@@ -2,21 +2,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
-import { FiltersMenu } from '../FiltersMenu';
+import { DatePeriodSelect, FiltersMenu, datePeriodLabel } from '../FiltersMenu';
 
-const PRESETS = [
-  ['today', 'Today'],
-  ['last_2_days', '2 days'],
-  ['last_7_days', 'Last 7 days'],
-  ['this_month', 'This month'],
-  ['last_month', 'Last month'],
-  ['last_2_months', 'Last 2 months'],
-  ['last_3_months', 'Last 3 months'],
-  ['last_6_months', 'Last 6 months'],
-  ['last_1_year', '1 year'],
-  ['all_time', 'All time'],
-  ['custom', 'Custom'],
-];
+const LEGACY_PRESETS = { today: 'Today', last_2_days: '2 days' };
 const STATUSES = [
   ['', 'All statuses'],
   ['paid', 'Paid'],
@@ -33,7 +21,7 @@ const money = (minor, currency = 'INR') => {
   return currency === 'INR' ? `₹${n}` : `${n} ${currency}`;
 };
 const when = (d) => (d ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—');
-const presetLabel = (q) => (q.preset === 'custom' ? `Custom${q.from || q.to ? `: ${q.from || '…'} – ${q.to || '…'}` : ''}` : (PRESETS.find(([id]) => id === q.preset)?.[1] || q.preset));
+const presetLabel = (q) => LEGACY_PRESETS[q.preset] || datePeriodLabel(q.preset, q);
 
 const qs = (o) => {
   const p = new URLSearchParams();
@@ -43,9 +31,7 @@ const qs = (o) => {
   return s ? `?${s}` : '';
 };
 
-function Choice({ label, pressed, onClick }) {
-  return <button type="button" className={`btn btn-sm ${pressed ? 'btn-primary' : 'btn-secondary'}`} style={{ justifyContent: 'flex-start', width: '100%' }} aria-pressed={pressed} onClick={onClick}>{label}</button>;
-}
+const field = { margin: 0, display: 'flex', flexDirection: 'column', gap: 4 };
 
 export function BillingHistoryPage({ onOpen, onOpenCollections, initialQuery }) {
   const [query, setQuery] = useState(initialQuery || empty);
@@ -109,21 +95,19 @@ export function BillingHistoryPage({ onOpen, onOpenCollections, initialQuery }) 
         onClose={() => setDraft(query)}
         applyDisabled={loading || (draft.preset === 'custom' && (!draft.from || !draft.to))}
       >
-        <div role="group" aria-label="Date range" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {PRESETS.map(([id, label]) => (
-            <Choice key={id} label={label} pressed={draft.preset === id} onClick={() => setDraft(d => ({ ...d, preset: id }))} />
-          ))}
-        </div>
-        {draft.preset === 'custom' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <label className="form-label" style={{ margin: 0 }}>From<input className="form-input" type="date" value={draft.from || ''} onChange={e => setDraft(d => ({ ...d, from: e.target.value }))} required /></label>
-            <label className="form-label" style={{ margin: 0 }}>To<input className="form-input" type="date" value={draft.to || ''} onChange={e => setDraft(d => ({ ...d, to: e.target.value }))} required /></label>
-          </div>
-        )}
-        <label className="form-label" style={{ margin: 0 }}>Status
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
-            {STATUSES.map(([id, label]) => <Choice key={id || 'all'} label={label} pressed={(draft.status || '') === id} onClick={() => setDraft(d => ({ ...d, status: id }))} />)}
-          </div>
+        <DatePeriodSelect
+          id="sa-billing-history-filters-period"
+          value={draft.preset || 'all_time'}
+          onChange={(preset) => setDraft(d => ({ ...d, preset }))}
+          from={draft.from}
+          to={draft.to}
+          onFromChange={(from) => setDraft(d => ({ ...d, from }))}
+          onToChange={(to) => setDraft(d => ({ ...d, to }))}
+        />
+        <label className="form-label" htmlFor="sa-billing-history-status" style={field}>Status
+          <select id="sa-billing-history-status" className="form-select" value={draft.status || ''} onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}>
+            {STATUSES.map(([id, label]) => <option key={id || 'all'} value={id}>{label}</option>)}
+          </select>
         </label>
         <label className="form-label" style={{ margin: 0 }}>Transaction type
           <select className="form-input" value={draft.kind || ''} onChange={e => setDraft(d => ({ ...d, kind: e.target.value }))}>

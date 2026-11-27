@@ -102,11 +102,14 @@ export function OffersPage({ onOpen }) {
         <label className="form-label" style={{ margin: 0 }}>Search
           <input className="form-input" value={draft.q} onChange={e => setDraft(d => ({ ...d, q: e.target.value }))} placeholder="Name or code" />
         </label>
-        <div role="group" aria-label="Offer status" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {[['', 'All statuses'], ['available', 'Available'], ['inactive', 'Inactive'], ['archived', 'Archived']].map(([id, label]) => (
-            <button key={id || 'all'} type="button" className={`btn btn-sm ${draft.status === id ? 'btn-primary' : 'btn-secondary'}`} style={{ justifyContent: 'flex-start', width: '100%' }} aria-pressed={draft.status === id} onClick={() => setDraft(d => ({ ...d, status: id }))}>{label}</button>
-          ))}
-        </div>
+        <label className="form-label" htmlFor="sa-offers-status" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>Status
+          <select id="sa-offers-status" className="form-select" value={draft.status} onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}>
+            <option value="">All statuses</option>
+            <option value="available">Available</option>
+            <option value="inactive">Inactive</option>
+            <option value="archived">Archived</option>
+          </select>
+        </label>
       </FiltersMenu>
       <SaModal open={open} title={editing ? 'Edit offer' : 'New offer'} onClose={() => setOpen(false)}>
         <form onSubmit={submit} style={{ display: 'grid', gap: 10 }}>

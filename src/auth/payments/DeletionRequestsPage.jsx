@@ -57,11 +57,11 @@ export function DeletionRequestsPage({ onOpen, onOpenLibrary }) {
         <label className="form-label" style={{ margin: 0 }}>Search
           <input className="form-input" value={draft.q} onChange={e => setDraft(d => ({ ...d, q: e.target.value }))} placeholder="Library, owner, email, reason" />
         </label>
-        <div role="group" aria-label="Request state" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {STATES.map(([id, label]) => (
-            <button key={id || 'all'} type="button" className={`btn btn-sm ${draft.state === id ? 'btn-primary' : 'btn-secondary'}`} style={{ justifyContent: 'flex-start', width: '100%' }} aria-pressed={draft.state === id} onClick={() => setDraft(d => ({ ...d, state: id }))}>{label}</button>
-          ))}
-        </div>
+        <label className="form-label" htmlFor="sa-deletion-requests-state" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>Request state
+          <select id="sa-deletion-requests-state" className="form-select" value={draft.state} onChange={e => setDraft(d => ({ ...d, state: e.target.value }))}>
+            {STATES.map(([id, label]) => <option key={id || 'all'} value={id}>{label}</option>)}
+          </select>
+        </label>
       </FiltersMenu>
       {rows.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>No deletion requests in this view.</p>}
       {rows.map(r => (
