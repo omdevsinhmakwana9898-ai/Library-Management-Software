@@ -6,7 +6,7 @@ import bcrypt from 'bcryptjs';
 import { User, Library, Settings } from './models.js';
 import { hashPassword, validatePassword } from './services.js';
 import { audit } from './audit.js';
-import { sendMail, mailEnabled } from './mailer.js';
+import { sendMail, emailDeliveryConfigured } from './mailer.js';
 import { sendMobileMessage, smsConfigured } from './messaging.js';
 import { verifyGoogleIdToken, googleEnabled } from './google.js';
 import { EMAIL_RE, normalizeEmail, normalizeMobile, isMobile, maskIdentifier } from './identity.js';
@@ -20,7 +20,7 @@ import {
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 const minutes = (n) => new Date(Date.now() + n * 60e3);
-const emailConfigured = () => mailEnabled() || process.env.NODE_ENV === 'test';
+const emailConfigured = () => emailDeliveryConfigured();
 const maskContact = (value) => String(value || '').replace(/^(.{2}).*(@.*)$/, '$1***$2').replace(/^(\d{2}).*(\d{4})$/, '$1****$2');
 
 const otpBase = {
@@ -198,7 +198,7 @@ async function sendReauthCode(user, channel, code) {
     if (!smsConfigured()) return { sent: false, reason: 'sms_not_configured' };
     return sendMobileMessage({ to: target, text: `Your My Library OS security code is ${code}. It expires in 10 minutes.` });
   }
-  if (!emailConfigured()) return { sent: false, reason: 'email_not_configured' };
+  if (!(await emailConfigured())) return { sent: false, reason: 'email_not_configured' };
   try {
     const sent = await sendMail({ to: target, subject: 'Your My Library OS security code', text: `Your security code is ${code}. It expires in 10 minutes.` });
     return { sent: Boolean(sent) || process.env.NODE_ENV === 'test', reason: sent ? null : 'email_capture_only' };
@@ -335,7 +335,7 @@ export function createProfileRouter() {
     let result;
     if (channel === 'mobile') {
       result = await sendMobileMessage({ to: target, text: `Your My Library OS verification code is ${code}. It expires in 10 minutes.` });
-    } else if (!emailConfigured()) {
+    } else if (!(await emailConfigured())) {
       result = { sent: false, reason: 'email_not_configured' };
     } else {
       try {
@@ -459,7 +459,7 @@ export function createProfileRouter() {
     if (via === 'mobile' && (!user.mobileVerified || !user.mobile)) return res.status(400).json({ error: 'That mobile number is not verified on this account', code: 'verified_channel_required' });
     if (via === 'email' && (!user.emailVerified || !user.email)) return res.status(400).json({ error: 'That email is not verified on this account', code: 'verified_channel_required' });
     if (via === 'mobile' && !smsConfigured()) return res.status(503).json({ error: 'Mobile verification is not configured. No email fallback was used.', code: 'mobile_otp_not_configured' });
-    if (via === 'email' && !emailConfigured()) return res.status(503).json({ error: 'Email delivery is not configured.', code: 'email_not_configured' });
+    if (via === 'email' && !(await emailConfigured())) return res.status(503).json({ error: 'Email delivery is not configured.', code: 'email_not_configured' });
     if (await throttleHit(`pwsetup:user:${user._id}`, 5, 15 * 60e3)) return res.status(429).json({ error: 'Too many requests. Try again later.' });
     if (await throttleHit(`pwsetup:resend:${user._id}:${via}`, 1, 30e3)) return res.status(429).json({ error: 'Please wait 30 seconds before requesting another code.' });
     const code = String(crypto.randomInt(0, 1e6)).padStart(6, '0');

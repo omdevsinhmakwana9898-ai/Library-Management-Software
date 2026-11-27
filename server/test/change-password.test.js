@@ -1,6 +1,8 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { setup, teardown, call, login, ctx } from './helpers.js';
+import { outbox } from '../src/mailer.js';
+import { PASSWORD_CHANGED_TEXT } from '../src/passwordChangedNotice.js';
 
 before(() => setup('chpw'));
 after(teardown);
@@ -11,6 +13,10 @@ test('change password: validation, wrong current, success, old stops working', a
   assert.equal((await call('POST', '/api/auth/change-password', { token: t, body: { currentPassword: 'wrong', newPassword: 'NewPassword-1' } })).status, 400);
   assert.equal((await call('POST', '/api/auth/change-password', { token: t, body: { currentPassword: 'Password-a-123', newPassword: 'Password-a-123' } })).status, 400);
   assert.equal((await call('POST', '/api/auth/change-password', { token: t, body: { currentPassword: 'Password-a-123', newPassword: 'NewPassword-1' } })).status, 200);
+  const notice = outbox.filter(m => m.to === 'admin-a@test.local' && m.subject === 'Your My Library OS password was changed').at(-1);
+  assert.ok(notice, 'password change writes a notice to the mail outbox');
+  assert.equal(notice.text, PASSWORD_CHANGED_TEXT);
+  assert.equal(notice.text.includes('NewPassword-1'), false);
   assert.equal(await login('admin-a@test.local', 'Password-a-123'), undefined);
   assert.ok(await login('admin-a@test.local', 'NewPassword-1'));
 });

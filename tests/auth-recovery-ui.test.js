@@ -16,6 +16,11 @@ test('forgot-password UI offers email, mobile, and linked Google', () => {
   assert.match(login, /no login code/);
   assert.match(api, /reset-password-google/);
   assert.match(api, /forgot-password-mobile/);
+  assert.match(login, /id="password-changed-notice"/);
+  assert.match(login, /Your password has been changed\. Please sign in\./);
+  assert.match(login, /id="forgot-sent-to"/);
+  assert.match(login, /••••/);
+  assert.match(login, /maskTypedEmail|maskTypedMobile/);
 });
 
 test('signup and forgot resend controls count down from 30 seconds', () => {

@@ -12,7 +12,7 @@ import { PartnersAdmin } from './PartnersAdmin';
 import { SupportDesk } from './SupportDesk';
 import { PlansAdmin } from './PlansAdmin';
 import { PaymentsAdmin } from './PaymentsAdmin';
-import { SystemWhatsAppAdmin } from './SystemWhatsAppAdmin';
+import { MessagingAdmin } from './MessagingAdmin';
 import { DemoRequestsAdmin } from './DemoRequestsAdmin';
 import { SaModal } from './SaModal';
 
@@ -139,7 +139,7 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
           <button role="tab" aria-selected={view === 'partners'} className={`btn btn-sm ${view === 'partners' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setView('partners')}>Partners &amp; Commissions</button>
           <button role="tab" aria-selected={view === 'plans'} className={`btn btn-sm ${view === 'plans' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setView('plans')}>Software plans</button>
           <button role="tab" aria-selected={view === 'payments'} className={`btn btn-sm ${view === 'payments' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setView('payments')}>Payments</button>
-          <button role="tab" aria-selected={view === 'whatsapp'} className={`btn btn-sm ${view === 'whatsapp' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setView('whatsapp')}>WhatsApp</button>
+          <button role="tab" id="sa-tab-messaging" aria-selected={view === 'messaging'} className={`btn btn-sm ${view === 'messaging' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setView('messaging')}>Messaging</button>
           <button role="tab" aria-selected={view === 'support'} className={`btn btn-sm ${view === 'support' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setView('support')}>Support tickets{summary?.kpis?.support?.value ? ` (${summary.kpis.support.value})` : ''}</button>
           <button role="tab" aria-selected={view === 'demos'} className={`btn btn-sm ${view === 'demos' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setView('demos')}>Demo requests</button>
         </div>
@@ -147,7 +147,7 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
         {view === 'insights' && <LibraryInsights libraries={libraries} />}
         {view === 'plans' && <PlansAdmin libraries={libraries} onChanged={load} />}
         {view === 'payments' && <PaymentsAdmin />}
-        {view === 'whatsapp' && <SystemWhatsAppAdmin />}
+        {view === 'messaging' && <MessagingAdmin accountMobile={user?.mobile || ''} />}
         {view === 'partners' && <PartnersAdmin libraries={libraries} onChanged={load} />}
         {view === 'support' && <SupportDesk libraries={libraries} onAccessLibrary={(id) => { const l = libraries.find(x => x.libraryId === id); if (l) onOpenLibrary(l, true); }} />}
         {view === 'demos' && <DemoRequestsAdmin />}

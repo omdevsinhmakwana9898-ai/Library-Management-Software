@@ -18,9 +18,18 @@ const GoogleIcon = () => (
 
 const ROLE_LABELS = { staff: 'Staff', client_admin: 'Co-admin', superadmin: 'Super Admin' };
 const roleLabel = (role) => ROLE_LABELS[role] || role || 'Staff';
+export const PASSWORD_CHANGED_SIGNIN = 'Your password has been changed. Please sign in.';
+
+function maskTypedEmail(email) {
+  return String(email || '').trim().replace(/^(.)(.*)(@.*)$/, (_, a, b, c) => a + '*'.repeat(Math.min(b.length, 6)) + c);
+}
+function maskTypedMobile(mobile) {
+  const tail = String(mobile || '').replace(/\D/g, '').slice(-4);
+  return tail ? `••••${tail}` : '';
+}
 
 export function LoginScreen({ existingUser = null } = {}) {
-  const { loginWithPassword, completeLogin, oauthError, googleSignupPending, clearGoogleSignupPending, googleResetToken, clearGoogleResetToken } = useAuth();
+  const { loginWithPassword, completeLogin, oauthError, googleSignupPending, clearGoogleSignupPending, googleResetToken, googleResetHint, clearGoogleResetToken } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -42,6 +51,7 @@ export function LoginScreen({ existingUser = null } = {}) {
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordChangedNotice, setPasswordChangedNotice] = useState(false);
 
   // Invite acceptance state
   const [inviteInfo, setInviteInfo] = useState(null);
@@ -142,6 +152,7 @@ export function LoginScreen({ existingUser = null } = {}) {
     setMode('forgot');
     setForgotStep(1);
     setForgotMessage('');
+    setPasswordChangedNotice(false);
   };
 
   const sendCode = async (e) => {
@@ -181,8 +192,8 @@ export function LoginScreen({ existingUser = null } = {}) {
       } else {
         await api.resetPassword(email, otp.trim(), newPassword);
       }
-      toast.success(forgotMethod === 'google' ? 'My Library OS password updated. Please sign in.' : 'Password changed. Please sign in.');
       clearGoogleResetToken?.();
+      setPasswordChangedNotice(true);
       setMode('login');
       setForgotStep(1);
       setForgotMethod('email');
@@ -273,6 +284,11 @@ export function LoginScreen({ existingUser = null } = {}) {
 
         {mode === 'login' && (
           <>
+            {passwordChangedNotice && (
+              <div id="password-changed-notice" role="status" style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#065f46', fontSize: 14, borderRadius: 8, padding: '10px 12px', marginBottom: 16 }}>
+                {PASSWORD_CHANGED_SIGNIN}
+              </div>
+            )}
             <form onSubmit={submit}>
               <div className="form-group">
                 <label className="form-label" htmlFor="login-email">Email or mobile</label>
@@ -334,14 +350,14 @@ export function LoginScreen({ existingUser = null } = {}) {
             <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 4px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
               <KeyRound size={16} /> {forgotStep === 1 ? 'Reset your password' : (forgotMethod === 'google' ? 'Set a My Library OS password' : 'Enter your reset code')}
             </h2>
-            <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: '0 0 16px 0' }}>
+            <p id="forgot-sent-to" style={{ color: 'var(--text-secondary)', fontSize: 13, margin: '0 0 16px 0' }}>
               {forgotStep === 1
                 ? 'Choose email, mobile, or the Google account already linked to this library. Mobile login stays password-only.'
                 : forgotMethod === 'google'
-                  ? 'This updates only your My Library OS password. It does not change your Google password.'
+                  ? `A reset link was confirmed for your linked Google account${googleResetHint ? ` (${googleResetHint})` : ''}. This updates only your My Library OS password. It does not change your Google password.`
                   : forgotMethod === 'mobile'
-                    ? `Enter the 6-digit WhatsApp code sent to ${forgotMobile || 'your mobile'} and choose a new password.`
-                    : `Enter the 6-digit code sent to ${email || 'your email'} and choose a new password.`}
+                    ? `A WhatsApp code was sent to ${maskTypedMobile(forgotMobile) || 'your mobile'}. Enter the 6-digit code and choose a new password.`
+                    : `An email code was sent to ${maskTypedEmail(email) || 'your email'}. Enter the 6-digit code and choose a new password.`}
             </p>
 
             {forgotStep === 1 && (
