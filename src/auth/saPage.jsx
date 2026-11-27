@@ -30,6 +30,10 @@ export const STATUS_PRESENTATION = {
   expiring: { label: 'Expiring', badge: 'badge-expiring' },
   cancelled: { label: 'Cancelled', badge: 'badge-expired' },
   canceled: { label: 'Cancelled', badge: 'badge-expired' },
+  archived: { label: 'Archived', badge: 'badge-disabled' },
+  public: { label: 'Public', badge: 'badge-open' },
+  hidden: { label: 'Hidden', badge: 'badge-disabled' },
+  outstanding: { label: 'Outstanding', badge: 'badge-pending' },
 };
 
 export function statusLabel(status) {

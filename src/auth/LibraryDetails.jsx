@@ -19,7 +19,7 @@ import {
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 const fmtStamp = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never');
 
-export function LibraryDetails({ libraryId, onBack, onOpenLibrary, onInvite, onReset, onDelete, onAnalytics, onChanged }) {
+export function LibraryDetails({ libraryId, onBack, backLabel = 'Library directory', onOpenLibrary, onInvite, onReset, onDelete, onAnalytics, onChanged }) {
   const [library, setLibrary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [city, setCity] = useState('');
@@ -27,6 +27,9 @@ export function LibraryDetails({ libraryId, onBack, onOpenLibrary, onInvite, onR
   const [statusOpen, setStatusOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [savingStatus, setSavingStatus] = useState(false);
+  const [plans, setPlans] = useState([]);
+  const [pendingPlan, setPendingPlan] = useState(null);
+  const [savingPlan, setSavingPlan] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -41,6 +44,11 @@ export function LibraryDetails({ libraryId, onBack, onOpenLibrary, onInvite, onR
   }, [libraryId]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    let cancel = false;
+    api.adminPlans().then(rows => { if (!cancel) setPlans(rows || []); }).catch(() => { if (!cancel) setPlans([]); });
+    return () => { cancel = true; };
+  }, [libraryId]);
 
   const saveCity = async (e) => {
     e.preventDefault();
@@ -72,13 +80,27 @@ export function LibraryDetails({ libraryId, onBack, onOpenLibrary, onInvite, onR
     finally { setSavingStatus(false); }
   };
 
+  const savePlan = async (e) => {
+    e.preventDefault();
+    if (!pendingPlan || !library) return;
+    setSavingPlan(true);
+    try {
+      await api.adminUpdateLibrary(libraryId, { planId: pendingPlan.planId });
+      toast.success(`${library.name}: assigned plan updated`);
+      setPendingPlan(null);
+      await load();
+      onChanged?.();
+    } catch (err) { toast.error(err.message); }
+    finally { setSavingPlan(false); }
+  };
+
   if (loading) return <SaPage id="sa-library-details"><p style={{ margin: 0 }}>Loading library…</p></SaPage>;
   if (!library) {
     return (
       <SaPage id="sa-library-details">
-        <SaPageHeader onBack={onBack} backLabel="Library directory" title="Library" subtitle="This record could not be opened." />
+        <SaPageHeader onBack={onBack} backLabel={backLabel} title="Library" subtitle="This record could not be opened." />
         <SaEmpty title="This library is not available">
-          Go back to the directory and choose another library.
+          Go back and choose another library.
         </SaEmpty>
       </SaPage>
     );
@@ -95,7 +117,7 @@ export function LibraryDetails({ libraryId, onBack, onOpenLibrary, onInvite, onR
     <SaPage id="sa-library-details">
       <SaPageHeader
         onBack={onBack}
-        backLabel="Library directory"
+        backLabel={backLabel}
         title={library.name}
       />
 
@@ -115,6 +137,22 @@ export function LibraryDetails({ libraryId, onBack, onOpenLibrary, onInvite, onR
         <SaFact label="Software Plan">{library.planName || 'No plan'}</SaFact>
         <SaFact label="Plan Expiry">{fmtDate(library.expiry)}</SaFact>
         <SaFact label="Subscription">{library.subscriptionLabel || '—'}</SaFact>
+        <SaFact label="Renewal">{library.renewalOutstanding ? 'Outstanding' : 'None outstanding'}</SaFact>
+        <SaFact label="Assigned software plan">
+          <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text-secondary)' }}>
+            Changing the assigned plan only updates this library’s plan. It does not create a charge, and it does not change the current subscription period, price, or past invoices.
+          </p>
+          <label className="form-label" htmlFor="sa-library-plan-assign">Plan
+            <select id="sa-library-plan-assign" className="form-select" style={{ maxWidth: '100%', marginTop: 4 }} value={library.planId || ''} onChange={e => {
+              const planId = e.target.value || null;
+              const plan = plans.find(p => p.planId === planId);
+              setPendingPlan({ planId, name: plan?.name || 'No plan' });
+            }}>
+              <option value="">No plan</option>
+              {plans.filter(p => p.active || p.planId === library.planId).map(p => <option key={p.planId} value={p.planId}>{p.name}{p.active ? '' : ' (archived)'}</option>)}
+            </select>
+          </label>
+        </SaFact>
       </SaRecordSection>
 
       <SaRecordSection title="Owner">
@@ -153,6 +191,21 @@ export function LibraryDetails({ libraryId, onBack, onOpenLibrary, onInvite, onR
         <button type="button" className="btn btn-secondary" onClick={() => onReset(library)}><KeyRound size={16} /> Assisted password reset</button>
         <button type="button" className="btn btn-secondary" onClick={() => { setReason(''); setStatusOpen(true); }}><Power size={16} /> {disabling ? 'Disable library' : 'Enable library'}</button>
       </SaRecordActions>
+
+      {pendingPlan && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Confirm plan change" onClick={() => !savingPlan && setPendingPlan(null)}>
+          <form className="modal-content" style={{ maxWidth: 480, padding: 20 }} onClick={e => e.stopPropagation()} onSubmit={savePlan}>
+            <h3 style={{ margin: '0 0 8px' }}>Assign {pendingPlan.name} to {library.name}?</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 12px' }}>
+              This sets the library’s plan only. It does not create a charge, rewrite open or paid invoices, or change the active subscription period or price. The owner still renews or upgrades from their own subscription page.
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button type="button" className="btn btn-secondary" disabled={savingPlan} onClick={() => setPendingPlan(null)}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={savingPlan}>{savingPlan ? 'Saving…' : 'Confirm assignment'}</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {statusOpen && (
         <div className="modal-overlay" role="dialog" aria-modal="true" aria-label={disabling ? 'Disable library' : 'Enable library'} onClick={() => !savingStatus && setStatusOpen(false)}>

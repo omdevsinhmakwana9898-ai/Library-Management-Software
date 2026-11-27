@@ -13,7 +13,8 @@ import { LibraryDetails } from './LibraryDetails';
 import { CollectionDetails, inrMinor } from './CollectionDetails';
 import { PartnersAdmin } from './PartnersAdmin';
 import { SupportDesk } from './SupportDesk';
-import { PlansAdmin } from './PlansAdmin';
+import { SoftwarePlansCatalog } from './SoftwarePlansCatalog';
+import { LibraryPlans } from './LibraryPlans';
 import { PaymentsAdmin } from './PaymentsAdmin';
 import { MessagingAdmin } from './MessagingAdmin';
 import { DemoRequestsAdmin } from './DemoRequestsAdmin';
@@ -66,6 +67,7 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
   const [collectionQuery, setCollectionQuery] = useState({ preset: 'this_month', q: '', kind: '', status: '', provider: '', from: '', to: '' });
   const collectionQueryRef = useRef(collectionQuery);
   const [insightNav, setInsightNav] = useState(null);
+  const [planDetailId, setPlanDetailId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ name: '', adminEmail: '', adminName: '' });
   const [createOpen, setCreateOpen] = useState(false);
@@ -87,6 +89,7 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
       await api.adminDeleteLibrary(deleteFor.libraryId, deleteName);
       toast.success(`${deleteFor.name} deleted`);
       if (insightNav?.libraryId === deleteFor.libraryId) setInsightNav(null);
+      if (planDetailId === deleteFor.libraryId) setPlanDetailId(null);
       setDeleteFor(null); setDeleteName(''); load();
     } catch (err) {
       // Shown inside the dialog: a toast can sit behind the full-screen dialog on phones.
@@ -207,7 +210,8 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
           <button role="tab" aria-selected={view === 'business'} className={`btn btn-sm ${view === 'business' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'business'; setView('business'); }}>Business dashboard</button>
           <button role="tab" aria-selected={view === 'insights'} className={`btn btn-sm ${view === 'insights' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'insights'; setView('insights'); setInsightNav(null); }}>Library Insights &amp; Analytics</button>
           <button role="tab" aria-selected={view === 'partners'} className={`btn btn-sm ${view === 'partners' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'partners'; setView('partners'); }}>Partners &amp; Commissions</button>
-          <button role="tab" aria-selected={view === 'plans'} className={`btn btn-sm ${view === 'plans' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'plans'; setView('plans'); }}>Software plans</button>
+          <button role="tab" id="sa-tab-software-plans" aria-selected={view === 'plans'} className={`btn btn-sm ${view === 'plans' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'plans'; setView('plans'); setPlanDetailId(null); }}>Software plans</button>
+          <button role="tab" id="sa-tab-library-plans" aria-selected={view === 'library-plans'} className={`btn btn-sm ${view === 'library-plans' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'library-plans'; setView('library-plans'); }}>Library plans</button>
           <button role="tab" aria-selected={view === 'payments'} className={`btn btn-sm ${view === 'payments' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'payments'; setView('payments'); }}>Payments</button>
           <button role="tab" id="sa-tab-messaging" aria-selected={view === 'messaging'} className={`btn btn-sm ${view === 'messaging' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'messaging'; setView('messaging'); }}>Messaging</button>
           <button role="tab" aria-selected={view === 'support'} className={`btn btn-sm ${view === 'support' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'support'; setView('support'); }}>Support tickets{summary?.kpis?.support?.value ? ` (${summary.kpis.support.value})` : ''}</button>
@@ -223,7 +227,21 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
             onBack={() => { viewRef.current = 'business'; setView('business'); }}
           />
         )}
-        {view === 'plans' && <PlansAdmin libraries={libraries} onChanged={load} />}
+        {view === 'plans' && <SoftwarePlansCatalog onChanged={load} />}
+        {view === 'library-plans' && !planDetailId && <LibraryPlans onOpen={setPlanDetailId} />}
+        {view === 'library-plans' && planDetailId && (
+          <LibraryDetails
+            libraryId={planDetailId}
+            backLabel="Back to library plans"
+            onBack={() => setPlanDetailId(null)}
+            onOpenLibrary={onOpenLibrary}
+            onInvite={(lib) => { setInviteEmail(''); setInviteFor(lib); }}
+            onReset={setResetFor}
+            onDelete={(lib) => { setDeleteFor(lib); setDeleteName(''); setDeleteError(''); }}
+            onAnalytics={(lib) => { setInsightNav({ page: 'analytics', libraryId: lib.libraryId, name: lib.name }); viewRef.current = 'insights'; setView('insights'); }}
+            onChanged={load}
+          />
+        )}
         {view === 'payments' && <PaymentsAdmin />}
         {view === 'messaging' && <MessagingAdmin accountMobile={user?.mobile || ''} />}
         {view === 'partners' && <PartnersAdmin libraries={libraries} onChanged={load} />}

@@ -16,7 +16,7 @@ import { audit } from './audit.js';
 import { todayIn } from './finance.js';
 import { SoftwarePlan } from './plans.js';
 import { currentMonthSoftwareCollection } from './businessCollections.js';
-import { libraryDirectory, libraryDetails } from './libraryDirectory.js';
+import { libraryDirectory, libraryDetails, libraryPlans } from './libraryDirectory.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const kpiProviders = [];
@@ -193,6 +193,11 @@ export function createInsightsRouter() {
     const q = req.query || {};
     await audit(req, 'library.directory.view', { target: 'library-directory', detail: { q: q.q || null, city: q.city || null, plan: q.plan || null, subscription: q.subscription || null, account: q.account || null, page: q.page || 1 } });
     res.json(await libraryDirectory(q, { loadExtras: libraryListExtras }));
+  }));
+  r.get('/library-plans', wrap(async (req, res) => {
+    const q = req.query || {};
+    await audit(req, 'library.plans.view', { target: 'library-plans', detail: { q: q.q || null, plan: q.plan || null, subscription: q.subscription || null, account: q.account || null, renewal: q.renewal || null, page: q.page || 1 } });
+    res.json(await libraryPlans(q, { loadExtras: libraryListExtras }));
   }));
   r.get('/library-directory/:libraryId', wrap(async (req, res) => {
     const libraryId = String(req.params.libraryId);
