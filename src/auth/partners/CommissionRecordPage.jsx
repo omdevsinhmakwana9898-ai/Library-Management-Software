@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Undo2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
-import { BackLink, STATUS_HELP, inr, rateText } from './shared';
+import { SaFact, SaFactList, SaPage, SaPageHeader, SaStatusBadge, SaSummaryCard, SaSummaryGrid } from '../saPage';
+import { STATUS_HELP, inr, rateText, requirementCopy, saleKindLabel } from './shared';
 
 export function CommissionRecordPage({ recordId, onOpen, onChanged }) {
   const [record, setRecord] = useState(null);
@@ -31,55 +32,76 @@ export function CommissionRecordPage({ recordId, onOpen, onChanged }) {
     } catch (err) { toast.error(err.message); }
     finally { setBusy(false); }
   };
-  if (!record) return <div id="sa-commission-record">Loading commission…</div>;
-  const rows = [
-    ['Date', record.saleDate || '—'],
-    ['Seller', record.sellerName || record.sellerId],
-    ['Library', record.libraryName || record.tenantId],
-    ['Sale type', record.kind === 'initial' ? 'New sale' : 'Renewal'],
-    ['Frozen rate', `${rateText(record.basis)}${record.basis?.version ? ` (v${record.basis.version})` : ''}`],
-    ['Commission amount', inr(record.amount)],
-    ['Sale amount', inr(record.saleAmount)],
-    ['Invoice / ref', record.saleRef],
-    ['Record status', record.status],
-    ['Tracking status', record.payoutStatus],
-    ['Requirement label', record.requirementLabel],
-  ];
+  if (!record) {
+    return (
+      <SaPage id="sa-commission-record">
+        <SaPageHeader onBack={() => onOpen('commissions')} backLabel="Commission records" title="Commission" subtitle="Loading this record." />
+        <p style={{ margin: 0, fontSize: 14, color: 'var(--text-secondary)' }}>Loading commission…</p>
+      </SaPage>
+    );
+  }
   return (
-    <div id="sa-commission-record" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      <div>
-        <BackLink onClick={() => onOpen('commissions')}>Commission records</BackLink>
-        <h2 style={{ fontSize: 22, fontWeight: 800, margin: '8px 0 0' }}>{inr(record.amount)}</h2>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>{STATUS_HELP}</p>
-      </div>
-      <div className="premium-card" style={{ padding: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: 10 }}>
-        {rows.map(([label, value]) => (
-          <div key={label}><div style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{label}</div><div style={{ fontSize: 14, overflowWrap: 'anywhere' }}>{value}{label === 'Record status' && record.statusReason ? ` — ${record.statusReason}` : ''}</div></div>
-        ))}
-      </div>
+    <SaPage id="sa-commission-record">
+      <SaPageHeader
+        onBack={() => onOpen('commissions')}
+        backLabel="Commission records"
+        title={inr(record.amount)}
+        subtitle={`${saleKindLabel(record.kind)} · ${record.sellerName || 'Seller'} · ${record.libraryName || 'Library'}. ${STATUS_HELP}`}
+      />
+      <SaSummaryGrid>
+        <SaSummaryCard label="Commission" value={inr(record.amount)} sub={`Sale ${inr(record.saleAmount)}`} tone="#ecfdf5" />
+        <SaSummaryCard label="Record status" value={<SaStatusBadge status={record.status} />} sub={record.statusReason || 'Set when the sale was recorded'} />
+        <SaSummaryCard label="Tracking" value={<SaStatusBadge status={record.payoutStatus} />} sub="Does not move money" tone="#fff7ed" />
+      </SaSummaryGrid>
+      <SaFactList>
+        <SaFact label="Date">{record.saleDate || '—'}</SaFact>
+        <SaFact label="Seller">{record.sellerName || record.sellerId}</SaFact>
+        <SaFact label="Library">{record.libraryName || record.tenantId}</SaFact>
+        <SaFact label="Sale type">{saleKindLabel(record.kind)}</SaFact>
+        <SaFact label="Frozen rate">{`${rateText(record.basis)}${record.basis?.version ? ` (v${record.basis.version})` : ''}`}</SaFact>
+        <SaFact label="Commission amount">{inr(record.amount)}</SaFact>
+        <SaFact label="Sale amount">{inr(record.saleAmount)}</SaFact>
+        <SaFact label="Invoice / ref">{record.saleRef}</SaFact>
+        <SaFact label="Record status"><SaStatusBadge status={record.status} /></SaFact>
+        <SaFact label="Tracking status"><SaStatusBadge status={record.payoutStatus} /></SaFact>
+        <SaFact label="Requirement">{requirementCopy(record.requirementLabel)}</SaFact>
+      </SaFactList>
       {record.status === 'earned' && (
-        <button type="button" className="btn btn-secondary btn-sm" style={{ justifySelf: 'start' }} onClick={reverse}><Undo2 size={14} /> Reverse earned commission</button>
+        <div className="sa-action-row">
+          <button type="button" className="btn btn-secondary" onClick={reverse}><Undo2 size={14} /> Reverse earned commission</button>
+        </div>
       )}
-      <form className="premium-card" style={{ padding: 14, display: 'grid', gap: 8 }} onSubmit={saveNote}>
-        <strong>Outside payout note</strong>
+      <form className="premium-card" style={{ padding: 16, display: 'grid', gap: 10, maxWidth: 640 }} onSubmit={saveNote}>
+        <strong style={{ fontSize: 16 }}>Outside payout note</strong>
         <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
           This is a tracking / bookkeeping note that an outside payout was recorded. It is not a bank transfer and not a payment executed in the app. The frozen rate and the commission amount stay as they were at sale time.
         </p>
         {record.payoutNote ? (
-          <p style={{ margin: 0, fontSize: 13 }}>Already noted: {record.payoutNote.reference} · {inr(record.payoutNote.amount)} · {record.payoutNote.date}. Tracking status {record.payoutStatus}. No money moved here.</p>
+          <p style={{ margin: 0, fontSize: 14 }}>Already noted: {record.payoutNote.reference} · {inr(record.payoutNote.amount)} · {record.payoutNote.date}. Tracking stays a note. No money moved here.</p>
         ) : record.status !== 'earned' ? (
-          <p style={{ margin: 0, fontSize: 13 }}>A note can be saved only while the record is earned.</p>
+          <p style={{ margin: 0, fontSize: 14 }}>A note can be saved only while the record is earned.</p>
         ) : (
           <>
-            <label className="form-label" style={{ margin: 0 }}>Reference<input className="form-input" required value={form.reference} onChange={e => setForm(f => ({ ...f, reference: e.target.value }))} /></label>
-            <label className="form-label" style={{ margin: 0 }}>Outside amount (₹)<input className="form-input" type="number" min="0.01" step="0.01" required value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} /></label>
-            <label className="form-label" style={{ margin: 0 }}>Date<input className="form-input" type="date" required value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></label>
-            <label className="form-label" style={{ margin: 0 }}>Note<input className="form-input" value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} /></label>
-            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}><input type="checkbox" checked={form.confirm} onChange={e => setForm(f => ({ ...f, confirm: e.target.checked }))} />I confirm this only records that a payout happened outside My Library OS. It does not pay the partner.</label>
-            <button className="btn btn-primary btn-sm" type="submit" disabled={busy || !form.confirm} style={{ justifySelf: 'start' }}>Save tracking note</button>
+            <label className="form-label" style={{ margin: 0 }}>Reference
+              <input className="form-input" required value={form.reference} onChange={e => setForm(f => ({ ...f, reference: e.target.value }))} />
+            </label>
+            <label className="form-label" style={{ margin: 0 }}>Outside amount (₹)
+              <input className="form-input" type="number" min="0.01" step="0.01" required value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+            </label>
+            <label className="form-label" style={{ margin: 0 }}>Date
+              <input className="form-input" type="date" required value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+            </label>
+            <label className="form-label" style={{ margin: 0 }}>Note
+              <input className="form-input" value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} />
+            </label>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+              <input type="checkbox" checked={form.confirm} onChange={e => setForm(f => ({ ...f, confirm: e.target.checked }))} />
+              I confirm this only records that a payout happened outside My Library OS. It does not pay the partner.
+            </label>
+            <button className="btn btn-primary" type="submit" disabled={busy || !form.confirm} style={{ justifySelf: 'start' }}>Save tracking note</button>
           </>
         )}
       </form>
-    </div>
+    </SaPage>
   );
 }

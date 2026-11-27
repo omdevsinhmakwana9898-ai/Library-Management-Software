@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../utils/api';
+import { SaPage, SaPageHeader } from './saPage';
 import { DirectoryPage } from './partners/DirectoryPage';
 import { PartnerDetailPage } from './partners/PartnerDetailPage';
 import { AssignmentsPage } from './partners/AssignmentsPage';
@@ -41,22 +42,20 @@ export function PartnersAdmin({ libraries, onChanged }) {
   if (page === 'record' && recordId) return <CommissionRecordPage recordId={recordId} onOpen={open} onChanged={onChanged} />;
   if (page === 'payouts') return <PayoutNotesPage libraries={libraries} onOpen={open} />;
   return (
-    <div id="sa-partners-landing" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      <div>
-        <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Partners &amp; Commissions</h2>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-          Directory, assignment, commission records, and outside payout notes each have their own page. Payouts are not handled inside the app. Whether partners need their own login remains an open owner question; the existing limited partner portal is unchanged.
-        </p>
-      </div>
+    <SaPage id="sa-partners-landing">
+      <SaPageHeader
+        title="Partners & Commissions"
+        subtitle="Directory, assignment, commission records, and outside payout notes each have their own page. Payouts are not handled inside the app. Whether partners need their own login remains an open owner question; the existing limited partner portal is unchanged."
+      />
       <SummaryCards summary={summary} />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: 12 }}>
+      <div className="sa-nav-grid">
         {LINKS.map(([id, title, text]) => (
-          <button key={id} type="button" className="premium-card" onClick={() => open(id)} style={{ textAlign: 'left', padding: 16, cursor: 'pointer', minWidth: 0 }}>
-            <strong style={{ fontSize: 16 }}>{title}</strong>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 6 }}>{text}</div>
+          <button key={id} type="button" className="premium-card sa-nav-card" onClick={() => open(id)}>
+            <strong>{title}</strong>
+            <span>{text}</span>
           </button>
         ))}
       </div>
-    </div>
+    </SaPage>
   );
 }

@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Plus, Power } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
 import { DatePeriodSelect, FiltersMenu, datePeriodLabel } from '../FiltersMenu';
-import { BackLink, PERM_LABEL, SummaryCards, qs, ruleText } from './shared';
+import { SaEmpty, SaList, SaListRow, SaPage, SaPageHeader, SaStatusBadge } from '../saPage';
+import { Pager, PERM_LABEL, SummaryCards, kindLabel, permText, qs, ruleText } from './shared';
 
 const empty = { q: '', partnerId: '', libraryId: '', kind: '', status: '', preset: 'all_time', from: '', to: '', page: 1 };
 
@@ -42,7 +42,7 @@ export function DirectoryPage({ libraries, onOpen, onChanged }) {
     query.partnerId && { key: 'partner', label: partnerName, onDismiss: () => setQuery({ ...query, partnerId: '', page: 1 }) },
     query.libraryId && { key: 'library', label: libraryName, onDismiss: () => setQuery({ ...query, libraryId: '', page: 1 }) },
     query.preset !== 'all_time' && { key: 'period', label: datePeriodLabel(query.preset, query), onDismiss: () => setQuery({ ...query, preset: 'all_time', from: '', to: '', page: 1 }) },
-    query.kind && { key: 'kind', label: query.kind, onDismiss: () => setQuery({ ...query, kind: '', page: 1 }) },
+    query.kind && { key: 'kind', label: kindLabel(query.kind), onDismiss: () => setQuery({ ...query, kind: '', page: 1 }) },
     query.status && { key: 'status', label: query.status, onDismiss: () => setQuery({ ...query, status: '', page: 1 }) },
   ].filter(Boolean);
 
@@ -56,30 +56,32 @@ export function DirectoryPage({ libraries, onOpen, onChanged }) {
       onChanged?.();
     } catch (err) { toast.error(err.message); }
   };
-  const toggle = async (p) => {
-    const status = p.status === 'Active' ? 'Disabled' : 'Active';
-    if (status === 'Disabled' && !window.confirm(`Disable ${p.name}? They will be signed out.`)) return;
-    try { await api.adminUpdatePartner(p.id, { status }); load(query); } catch (e) { toast.error(e.message); }
-  };
-  const perm = async (p, k) => {
-    try { await api.adminUpdatePartner(p.id, { permissions: { [k]: !p.permissions[k] } }); load(query); } catch (e) { toast.error(e.message); }
-  };
 
   const items = data?.items || [];
   return (
-    <div id="sa-partners-directory" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      <div>
-        <BackLink onClick={() => onOpen('landing')}>Partners &amp; Commissions</BackLink>
-        <h2 style={{ fontSize: 22, fontWeight: 800, margin: '8px 0 0' }}>Partners and agents</h2>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>Type, login email, status, permissions, assigned libraries, and the current commission rules. Open a row for the detail view.</p>
-      </div>
+    <SaPage id="sa-partners-directory">
+      <SaPageHeader
+        onBack={() => onOpen('landing')}
+        backLabel="Partners & Commissions"
+        title="Partners and agents"
+        subtitle="Type, login email, status, permissions, assigned libraries, and the current commission rules. Open a person for the detail page."
+      />
       <SummaryCards summary={summary} />
-      <form className="premium-card" style={{ padding: 14, display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', alignItems: 'end' }} onSubmit={create}>
-        <strong style={{ gridColumn: '1 / -1' }}>Add partner or agent</strong>
-        <label className="form-label" style={{ margin: 0 }}>Type<select className="form-input" value={form.kind} onChange={e => setForm(f => ({ ...f, kind: e.target.value }))}><option value="partner">Partner (manages clients)</option><option value="agent">Agent (sales/referrals)</option></select></label>
-        <label className="form-label" style={{ margin: 0 }}>Name<input className="form-input" required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></label>
-        <label className="form-label" style={{ margin: 0 }}>Login email<input className="form-input" type="email" required value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></label>
-        <button className="btn btn-primary btn-sm" type="submit"><Plus size={14} /> <span>Create</span></button>
+      <form className="premium-card" style={{ padding: 16, display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', alignItems: 'end' }} onSubmit={create}>
+        <strong style={{ gridColumn: '1 / -1', fontSize: 16 }}>Add partner or agent</strong>
+        <label className="form-label" style={{ margin: 0 }}>Type
+          <select className="form-select" value={form.kind} onChange={e => setForm(f => ({ ...f, kind: e.target.value }))}>
+            <option value="partner">Partner (manages clients)</option>
+            <option value="agent">Agent (sales/referrals)</option>
+          </select>
+        </label>
+        <label className="form-label" style={{ margin: 0 }}>Name
+          <input className="form-input" required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+        </label>
+        <label className="form-label" style={{ margin: 0 }}>Login email
+          <input className="form-input" type="email" required value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+        </label>
+        <button className="btn btn-primary" type="submit">Create</button>
       </form>
       <FiltersMenu
         buttonId="sa-partners-filters-button"
@@ -127,40 +129,35 @@ export function DirectoryPage({ libraries, onOpen, onChanged }) {
           </select>
         </label>
       </FiltersMenu>
-      <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0 }}>Period filters by the date the partner or agent was created. {data?.total ?? 0} matches.</p>
-      <div className="premium-card sa-table-card" style={{ padding: 0 }}>
-        <div className="table-container">
-          <table className="data-grid" style={{ width: '100%' }}>
-            <thead><tr><th>Name</th><th>Type</th><th>Login email</th><th>Status</th><th>Permissions</th><th>Assigned libraries</th><th>Current rules</th><th></th></tr></thead>
-            <tbody>
-              {items.length === 0 && <tr><td colSpan={8}>{loading ? 'Loading…' : 'No partners or agents match.'}</td></tr>}
-              {items.map(p => (
-                <tr key={p.id}>
-                  <td><button type="button" className="btn btn-ghost btn-sm" style={{ padding: 0, fontWeight: 700 }} onClick={() => onOpen('detail', p.id)}>{p.name}</button></td>
-                  <td>{p.kind}</td>
-                  <td style={{ fontSize: 12 }}>{p.email}<div style={{ color: 'var(--text-tertiary)' }}>{p.emailVerified ? 'Verified' : 'Not verified'}</div></td>
-                  <td><span className={`badge ${p.status === 'Active' ? 'badge-active' : 'badge-expired'}`}>{p.status}</span></td>
-                  <td style={{ fontSize: 12 }}>
-                    {Object.keys(PERM_LABEL).map(k => (
-                      <label key={k} style={{ display: 'flex', gap: 4, alignItems: 'center' }}><input type="checkbox" checked={!!p.permissions?.[k]} onChange={() => perm(p, k)} />{PERM_LABEL[k]}</label>
-                    ))}
-                  </td>
-                  <td style={{ fontSize: 12 }}>{p.assignedLibraries?.length ? p.assignedLibraries.map(l => l.name).join(', ') : '—'}</td>
-                  <td style={{ fontSize: 12 }}>New sale {ruleText(p.rules?.initial)}<div>Renewal {ruleText(p.rules?.renewal)}</div></td>
-                  <td><button className="btn btn-ghost btn-sm" title={p.status === 'Active' ? 'Disable' : 'Enable'} onClick={() => toggle(p)}><Power size={14} /></button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      {data && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button type="button" className="btn btn-secondary btn-sm" disabled={query.page <= 1 || loading} onClick={() => setQuery({ ...query, page: query.page - 1 })}>Previous</button>
-          <span style={{ fontSize: 13 }}>Page {data.page} of {data.pages}</span>
-          <button type="button" className="btn btn-secondary btn-sm" disabled={query.page >= data.pages || loading} onClick={() => setQuery({ ...query, page: query.page + 1 })}>Next</button>
-        </div>
+      <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>Period filters by the date the partner or agent was created. {data?.total ?? 0} matches.</p>
+      {loading && items.length === 0 && <p style={{ margin: 0, fontSize: 14, color: 'var(--text-secondary)' }}>Loading…</p>}
+      {!loading && items.length === 0 && (
+        <SaEmpty title="No partners or agents match">
+          Clear a filter, or add a partner or agent above.
+        </SaEmpty>
       )}
-    </div>
+      {items.length > 0 && (
+        <SaList>
+          {items.map(p => (
+            <SaListRow
+              key={p.id}
+              title={p.name}
+              meta={`${kindLabel(p.kind)} · ${p.email}`}
+              extra={`${p.emailVerified ? 'Verified login email' : 'Login email not verified'} · ${permText(p)} · ${p.assignedLibraries?.length ? p.assignedLibraries.map(l => l.name).join(', ') : 'No assigned libraries'} · New sale ${ruleText(p.rules?.initial)} · Renewal ${ruleText(p.rules?.renewal)}`}
+              onClick={() => onOpen('detail', p.id)}
+              badge={(
+                <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <SaStatusBadge status={p.kind === 'agent' ? 'open' : 'active'}>{kindLabel(p.kind)}</SaStatusBadge>
+                  <SaStatusBadge status={p.emailVerified ? 'active' : 'pending'}>{p.emailVerified ? 'Verified' : 'Not verified'}</SaStatusBadge>
+                  <SaStatusBadge status={p.status} />
+                </span>
+              )}
+            />
+          ))}
+        </SaList>
+      )}
+      <Pager page={query.page} pages={data?.pages} loading={loading} onPage={(page) => setQuery({ ...query, page })} />
+      <p style={{ margin: 0, fontSize: 12, color: 'var(--text-tertiary)' }}>Permissions you can grant: {Object.values(PERM_LABEL).join(', ')}. Change them on the person’s page.</p>
+    </SaPage>
   );
 }

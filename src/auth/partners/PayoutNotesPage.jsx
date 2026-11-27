@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
 import { DatePeriodSelect, FiltersMenu, datePeriodLabel } from '../FiltersMenu';
-import { BackLink, inr, qs } from './shared';
+import { SaEmpty, SaList, SaListRow, SaPage, SaPageHeader, SaStatusBadge, SaSummaryCard, SaSummaryGrid } from '../saPage';
+import { Pager, inr, qs } from './shared';
 
 const empty = { q: '', partnerId: '', libraryId: '', preset: 'all_time', from: '', to: '', page: 1 };
 
@@ -29,14 +30,18 @@ export function PayoutNotesPage({ libraries, onOpen }) {
   const seller = (id) => partners.find(p => p.id === id)?.name || id;
   const libName = (id) => libraries.find(l => l.libraryId === id)?.name || id;
   return (
-    <div id="sa-payout-records" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      <div>
-        <BackLink onClick={() => onOpen('landing')}>Partners &amp; Commissions</BackLink>
-        <h2 style={{ fontSize: 22, fontWeight: 800, margin: '8px 0 0' }}>Outside payout notes</h2>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-          Each row is a tracking / bookkeeping note that an outside payout was recorded. Nothing here is a bank transfer or a payment executed in the app. Commission amounts and frozen rates are unchanged.
-        </p>
-      </div>
+    <SaPage id="sa-payout-records">
+      <SaPageHeader
+        onBack={() => onOpen('landing')}
+        backLabel="Partners & Commissions"
+        title="Outside payout notes"
+        subtitle="Each row is a tracking / bookkeeping note that an outside payout was recorded. Nothing here is a bank transfer or a payment executed in the app. Commission amounts and frozen rates are unchanged."
+      />
+      <SaSummaryGrid>
+        <SaSummaryCard label="Notes" value={data?.total ?? '…'} sub="Matching this filter" />
+        <SaSummaryCard label="On this page" value={items.length} sub={data?.page ? `Page ${data.page}` : '—'} tone="#eff6ff" />
+        <SaSummaryCard label="Payment in the app" value="No" sub="Bookkeeping only" tone="#fff7ed" />
+      </SaSummaryGrid>
       <FiltersMenu
         buttonId="sa-payout-records-filters-button"
         menuId="sa-payout-records-filters-menu"
@@ -72,32 +77,35 @@ export function PayoutNotesPage({ libraries, onOpen }) {
           </select>
         </label>
       </FiltersMenu>
-      <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0 }}>{data?.note} {data?.paymentExecuted === false ? 'paymentExecuted is false.' : ''}</p>
-      <div className="premium-card sa-table-card" style={{ padding: 0 }}>
-        <div className="table-container">
-          <table className="data-grid" style={{ width: '100%' }}>
-            <thead><tr><th>Note date</th><th>Reference</th><th>Noted amount</th><th>Commission</th><th>Seller</th><th>Library</th></tr></thead>
-            <tbody>
-              {items.length === 0 && <tr><td colSpan={6}>{loading ? 'Loading…' : 'No outside payout notes yet.'}</td></tr>}
-              {items.map(r => (
-                <tr key={r.id}>
-                  <td>{r.payoutNote?.date}</td>
-                  <td><button type="button" className="btn btn-ghost btn-sm" style={{ padding: 0 }} onClick={() => onOpen('record', r.id)}>{r.payoutNote?.reference}</button></td>
-                  <td>{inr(r.payoutNote?.amount)}</td>
-                  <td>{inr(r.amount)}<div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{rateTextSafe(r)}</div></td>
-                  <td>{seller(r.sellerId)}</td>
-                  <td>{libName(r.tenantId)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+      <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>{data?.note} {data?.paymentExecuted === false ? 'No payment was executed.' : ''}</p>
+      {loading && items.length === 0 && <p style={{ margin: 0, fontSize: 14, color: 'var(--text-secondary)' }}>Loading…</p>}
+      {!loading && items.length === 0 && (
+        <SaEmpty title="No outside payout notes yet">
+          Open a commission record to save a tracking note. That note does not move money.
+        </SaEmpty>
+      )}
+      {items.length > 0 && (
+        <SaList>
+          {items.map(r => (
+            <SaListRow
+              key={r.id}
+              title={r.payoutNote?.reference || 'Outside note'}
+              meta={`${r.payoutNote?.date || '—'} · ${seller(r.sellerId)} · ${libName(r.tenantId)}`}
+              extra={`Commission ${inr(r.amount)} · ${rateTextSafe(r)}`}
+              amount={inr(r.payoutNote?.amount)}
+              onClick={() => onOpen('record', r.id)}
+              badge={<SaStatusBadge status="paid">Paid note</SaStatusBadge>}
+            />
+          ))}
+        </SaList>
+      )}
+      <Pager page={query.page} pages={data?.pages} loading={loading} onPage={(page) => setQuery({ ...query, page })} />
+    </SaPage>
   );
 }
 
 function rateTextSafe(r) {
   if (r.basis?.mode === 'percent') return `${r.basis.value}% frozen`;
+  if (r.basis?.value != null) return 'Fixed rate frozen';
   return 'Frozen rate unchanged';
 }

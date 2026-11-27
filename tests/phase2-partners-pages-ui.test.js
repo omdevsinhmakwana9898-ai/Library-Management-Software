@@ -13,6 +13,9 @@ const notes = readFileSync(new URL('../src/auth/partners/PayoutNotesPage.jsx', i
 const portal = readFileSync(new URL('../src/auth/PartnerPortal.jsx', import.meta.url), 'utf8');
 const filtersMenu = readFileSync(new URL('../src/auth/FiltersMenu.jsx', import.meta.url), 'utf8');
 const presets = readFileSync(new URL('../server/src/partners.js', import.meta.url), 'utf8');
+const shared = readFileSync(new URL('../src/auth/partners/shared.jsx', import.meta.url), 'utf8');
+const sale = readFileSync(new URL('../src/auth/partners/SaleRecordPage.jsx', import.meta.url), 'utf8');
+const kit = readFileSync(new URL('../src/auth/saPage.jsx', import.meta.url), 'utf8');
 
 test('partners landing links to the dedicated super admin pages', () => {
   assert.match(dash, /id="sa-tab-partners"/);
@@ -70,4 +73,52 @@ test('partners landing links to the dedicated super admin pages', () => {
   assert.match(portal, /PartnerPortal|assigned clients|Access Library/);
   assert.doesNotMatch(notes, /razorpay|bank account|IFSC/i);
   assert.doesNotMatch(record, /razorpay|IFSC/i);
+});
+
+test('partner inner pages use the shared super admin page kit', () => {
+  for (const file of [landing, directory, detail, assignments, commissions, record, notes]) {
+    assert.match(file, /SaPage/);
+    assert.match(file, /SaPageHeader/);
+  }
+  assert.match(landing, /sa-nav-card/);
+  assert.match(landing, /SummaryCards/);
+  assert.match(shared, /SaSummaryCard/);
+  assert.match(shared, /Active partners/);
+  assert.match(shared, /Assigned libraries/);
+  assert.match(shared, /Earned commission/);
+  assert.match(shared, /Unpaid commission/);
+  assert.match(directory, /SaListRow/);
+  assert.match(directory, /SaEmpty/);
+  assert.match(directory, /SaStatusBadge/);
+  assert.match(directory, /onOpen\('detail'/);
+  assert.match(commissions, /SaListRow/);
+  assert.match(commissions, /SaEmpty/);
+  assert.match(commissions, /SaStatusBadge/);
+  assert.match(commissions, /onOpen\('record'/);
+  assert.match(commissions, /setScreen\('sale'\)/);
+  assert.match(assignments, /SaListRow/);
+  assert.match(assignments, /SaEmpty/);
+  assert.match(assignments, /SaStatusBadge/);
+  assert.match(notes, /SaListRow/);
+  assert.match(notes, /SaEmpty/);
+  assert.match(notes, /onOpen\('record'/);
+  assert.match(record, /SaSummaryCard/);
+  assert.match(record, /SaFactList/);
+  assert.match(record, /SaStatusBadge/);
+  assert.match(detail, /SaSummaryCard/);
+  assert.match(detail, /SaEmpty/);
+  assert.match(sale, /id="sa-record-sale"/);
+  assert.match(sale, /SaPageHeader/);
+  assert.match(sale, /onBack/);
+  assert.match(sale, /Record a software sale/);
+  assert.match(sale, /frozen at this moment/);
+  assert.match(kit, /earned:/);
+  assert.match(kit, /reversed:/);
+  assert.match(kit, /unpaid:/);
+  assert.doesNotMatch(sale, /SaModal/);
+  assert.doesNotMatch(shared, /SaModal/);
+  assert.doesNotMatch(commissions, /SaModal/);
+  assert.doesNotMatch(directory, /SaModal/);
+  assert.doesNotMatch(detail, /SaModal/);
+  assert.doesNotMatch(portal, /SaPageHeader/);
 });
