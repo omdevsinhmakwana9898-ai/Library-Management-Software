@@ -17,6 +17,7 @@ import { assertModule, staffContext, assertMoneySync, prepareStaffWrite, staffAl
 import { createNotificationRouter } from './notifications.js';
 import { createActionDismissalRouter } from './actionDismissals.js';
 import { createInsightsRouter } from './insights.js';
+import { createBusinessDashboardRouter } from './businessCollections.js';
 import { createSupportRouter, createSupportAdminRouter, createPublicSupportRouter } from './support.js';
 import { createPartnerAdminRouter, createPartnerPortalRouter } from './partners.js';
 import { createTemplateRouter } from './templates.js';
@@ -330,6 +331,7 @@ admin.use(requireRole('superadmin'));
 
 admin.use(createDemoRequestAdminRouter());
 admin.use(createInsightsRouter());
+admin.use(createBusinessDashboardRouter());
 admin.use(createPartnerAdminRouter());
 admin.use(createSupportAdminRouter());
 admin.use(createPlanAdminRouter());

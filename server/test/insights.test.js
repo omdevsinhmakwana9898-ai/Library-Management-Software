@@ -23,9 +23,12 @@ test('main dashboard holds only SaaS KPIs (no customer students/seats/fees)', as
   const r = await call('GET', '/api/admin/saas-summary', { token: SA() });
   assert.equal(r.status, 200);
   assert.equal(r.body.libraries.total, 2); assert.equal(r.body.libraries.active, 2);
-  assert.ok(r.body.notAvailable.includes('softwareRevenue'));
+  assert.ok(!r.body.notAvailable.includes('softwareRevenue'));
+  assert.equal(r.body.softwareRevenue.collectedMinor, 0);
+  assert.equal(r.body.softwareRevenue.paymentCount, 0);
+  assert.ok(r.body.notAvailable.includes('whatsappAddonRevenue'));
   const flat = JSON.stringify(r.body);
-  for (const k of ['studentsActive', 'seatsTotal', 'revenue', 'collections', 'expenses', 'Secret Name']) assert.ok(!flat.includes(k), `summary leaks ${k}`);
+  for (const k of ['studentsActive', 'seatsTotal', 'customerFeeCollections', 'Secret Name']) assert.ok(!flat.includes(k), `summary leaks ${k}`);
   const a = r.body.list.find(l => l.libraryId === 'lib-a');
   assert.equal(a.owner.email, 'admin-a@test.local'); assert.equal(a.city, 'Pune');
 });
