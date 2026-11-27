@@ -1,8 +1,8 @@
 // Super Admin software-plan catalog. Assignment lives on the Library plans page.
 import React, { useCallback, useEffect, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../utils/api';
-import { SaModal } from './SaModal';
 import { FiltersMenu } from './FiltersMenu';
 import { DURATION_ROWS, durationPayload, durationsFromPlan, emptyDurations, setMonthlyKeepingDiscounts } from '../utils/softwarePlanForm';
 
@@ -30,7 +30,7 @@ export function SoftwarePlansCatalog({ onChanged }) {
   const [plans, setPlans] = useState([]);
   const [form, setForm] = useState(EMPTY);
   const [editing, setEditing] = useState(null);
-  const [open, setOpen] = useState(false);
+  const [screen, setScreen] = useState('catalog');
   const [detail, setDetail] = useState(null);
   const [filters, setFilters] = useState(emptyFilters);
   const [draft, setDraft] = useState(emptyFilters);
@@ -57,7 +57,17 @@ export function SoftwarePlansCatalog({ onChanged }) {
       whatsappEntitlement: p.whatsappEntitlement === true ? true : p.whatsappEntitlement === false ? false : null,
       durationPricing: durationsFromPlan(p),
     } : EMPTY);
-    setOpen(true);
+    setScreen('editor');
+  };
+
+  const openDetails = (p) => {
+    setDetail(p);
+    setScreen('details');
+  };
+
+  const backToCatalog = () => {
+    setScreen('catalog');
+    setDetail(null);
   };
 
   const save = async (e) => {
@@ -80,8 +90,7 @@ export function SoftwarePlansCatalog({ onChanged }) {
       if (editing) await api.adminUpdatePlan(editing, body);
       else await api.adminCreatePlan(body);
       toast.success(`Plan ${editing ? 'updated' : 'created'}`);
-      setOpen(false);
-      setDetail(null);
+      backToCatalog();
       load();
       onChanged?.();
     } catch (err) { toast.error(err.message); }
@@ -93,7 +102,7 @@ export function SoftwarePlansCatalog({ onChanged }) {
     try {
       await api.adminDeletePlan(p.planId);
       toast.success('Plan deleted');
-      setDetail(null);
+      backToCatalog();
       load();
     } catch (e) { toast.error(e.message); }
   };
@@ -106,7 +115,7 @@ export function SoftwarePlansCatalog({ onChanged }) {
       }
       await api.adminUpdatePlan(p.planId, { active: !p.active, ...(p.active && p.libraries > 0 ? { confirmArchive: true } : {}) });
       toast.success(p.active ? 'Plan archived' : 'Plan restored');
-      setDetail(null);
+      if (screen === 'details') backToCatalog();
       load();
       onChanged?.();
     } catch (e) { toast.error(e.message); }
@@ -131,104 +140,52 @@ export function SoftwarePlansCatalog({ onChanged }) {
     filters.visibility !== 'all' && { key: 'visibility', label: filters.visibility === 'public' ? 'Public' : 'Hidden', onDismiss: () => setFilters(f => ({ ...f, visibility: 'all' })) },
   ].filter(Boolean);
 
-  return (
-    <div id="sa-software-plans-catalog" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div className="premium-card" style={{ padding: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 16 }}>Software plans catalog</h3>
-            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>Plans offered to libraries. Assigning a plan to a library is on Library plans.</p>
-          </div>
-          <button className="btn btn-primary btn-sm" onClick={() => startEdit(null)}>+ New plan</button>
+  if (screen === 'details' && detail) {
+    return (
+      <div id="sa-plan-details" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={backToCatalog}><ArrowLeft size={14} /> Software plans</button>
+          <h2 style={{ fontSize: 22, fontWeight: 800, margin: '8px 0 0' }}>{detail.name}</h2>
         </div>
-        <FiltersMenu
-          buttonId="sa-software-plans-filters-button"
-          menuId="sa-software-plans-filters-menu"
-          chips={chips}
-          onApply={() => setFilters(draft)}
-          onReset={() => { setDraft(emptyFilters); setFilters(emptyFilters); }}
-          onClose={() => setDraft(filters)}
-        >
-          <label className="form-label" htmlFor="sa-software-plans-status" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>Status
-            <select id="sa-software-plans-status" className="form-select" value={draft.status} onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}>
-              <option value="all">All plans</option>
-              <option value="active">Active</option>
-              <option value="archived">Archived</option>
-            </select>
-          </label>
-          <label className="form-label" htmlFor="sa-software-plans-visibility" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>Visibility
-            <select id="sa-software-plans-visibility" className="form-select" value={draft.visibility} onChange={e => setDraft(d => ({ ...d, visibility: e.target.value }))}>
-              <option value="all">Any visibility</option>
-              <option value="public">Public on signup</option>
-              <option value="hidden">Hidden from signup</option>
-            </select>
-          </label>
-        </FiltersMenu>
-        {shown.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 12 }}>No plans match these filters.</p>}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 260px), 1fr))', gap: 12, marginTop: 12 }}>
-          {shown.map(p => {
-            const features = p.features || [];
-            return (
-              <div key={p.planId} data-plan={p.planId} role="button" tabIndex={0} onClick={() => setDetail(p)} onKeyDown={e => { if (e.key === 'Enter') setDetail(p); }} style={{ border: '1px solid var(--border-light, #e5e7eb)', borderRadius: 8, padding: 12, opacity: p.active ? 1 : 0.7, cursor: 'pointer', textAlign: 'left', minWidth: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
-                  <strong style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}><span aria-hidden="true" style={{ fontSize: 18 }}>{p.icon || '◆'}</span><span style={{ overflowWrap: 'anywhere' }}>{p.name}</span></strong>
-                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{visibilityLabel(p)}</span>
-                </div>
-                <div style={{ fontSize: 18, fontWeight: 700, margin: '6px 0' }}>{inr(p.priceMonthly)}<span style={{ fontSize: 12, fontWeight: 400 }}>/month</span></div>
-                <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{inr(yearlyAmount(p))}<span style={{ fontSize: 12 }}>/year</span>{p.recommended ? <span style={{ fontSize: 11, marginLeft: 6 }}>Recommended</span> : null}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6 }}>Seats: {fmtLimit(p.deskLimit)} · Branches: {fmtLimit(p.branchLimit)} · Staff logins: {fmtLimit(p.staffLimit)} · Students: {fmtLimit(p.studentLimit)}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{p.trialDays ? `${p.trialDays}-day trial` : 'No trial'} · {p.whatsappIncluded ? 'WhatsApp included' : 'WhatsApp not included'}</div>
-                {features.length > 0 && <ul style={{ fontSize: 12, margin: '6px 0 0', paddingLeft: 18 }}>{features.slice(0, 4).map(f => <li key={f}>{f}</li>)}{features.length > 4 && <li>+{features.length - 4} more</li>}</ul>}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, gap: 8, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{p.libraries} assigned {p.libraries === 1 ? 'library' : 'libraries'}</span>
-                  <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); startEdit(p); }}>Edit</button>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); toggleArchive(p); }}>{p.active ? 'Archive' : 'Restore'}</button>
-                    {p.libraries === 0
-                      ? <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); remove(p); }}>Delete</button>
-                      : <span style={{ fontSize: 11, color: 'var(--text-tertiary)', alignSelf: 'center' }}>In use — Archive instead</span>}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
+        <div className="premium-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+            <strong style={{ fontSize: 18 }}>{detail.icon || '◆'} {detail.name}</strong>
+            <span>{visibilityLabel(detail)}{detail.recommended ? ' · Recommended' : ''}</span>
+          </div>
+          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{detail.description || 'No description.'}</p>
+          <div>Monthly {inr(detail.priceMonthly)} · Yearly {inr(yearlyAmount(detail))}</div>
+          <div>Seat capacity {fmtLimit(detail.deskLimit)} · Branches {fmtLimit(detail.branchLimit)} · Staff logins {fmtLimit(detail.staffLimit)} · Students {fmtLimit(detail.studentLimit)}</div>
+          <div>{detail.trialDays ? `${detail.trialDays}-day trial` : 'No trial'} · {detail.whatsappIncluded ? 'WhatsApp included' : 'WhatsApp not included'}</div>
+          <div>{detail.libraries} assigned {detail.libraries === 1 ? 'library' : 'libraries'}</div>
+          <div>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>Enabled features</div>
+            {(detail.features || []).length === 0 && <span style={{ color: 'var(--text-tertiary)' }}>None listed.</span>}
+            <ul style={{ margin: 0, paddingLeft: 18 }}>{(detail.features || []).map(f => <li key={f}>{f}</li>)}</ul>
+          </div>
+          {(detail.highlights || []).length > 0 && (
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>Shown to owners</div>
+              <ul style={{ margin: 0, paddingLeft: 18 }}>{detail.highlights.map(f => <li key={f}>{f}</li>)}</ul>
+            </div>
+          )}
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--text-tertiary)' }}>Catalog prices apply to future public pages, signups, and upgrade quotes. They do not change paid invoices, open invoice amounts, or a library’s current subscription period or price.</p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-secondary" onClick={() => startEdit(detail)}>Edit</button>
+            <button type="button" className="btn btn-secondary" onClick={() => toggleArchive(detail)}>{detail.active ? 'Archive' : 'Restore'}</button>
+          </div>
         </div>
       </div>
+    );
+  }
 
-      <SaModal open={!!detail} title={detail ? detail.name : 'Plan'} onClose={() => setDetail(null)} maxWidth={640}>
-        {detail && (
-          <div id="sa-plan-details" style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 14 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-              <strong style={{ fontSize: 18 }}>{detail.icon || '◆'} {detail.name}</strong>
-              <span>{visibilityLabel(detail)}{detail.recommended ? ' · Recommended' : ''}</span>
-            </div>
-            <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{detail.description || 'No description.'}</p>
-            <div>Monthly {inr(detail.priceMonthly)} · Yearly {inr(yearlyAmount(detail))}</div>
-            <div>Seat capacity {fmtLimit(detail.deskLimit)} · Branches {fmtLimit(detail.branchLimit)} · Staff logins {fmtLimit(detail.staffLimit)} · Students {fmtLimit(detail.studentLimit)}</div>
-            <div>{detail.trialDays ? `${detail.trialDays}-day trial` : 'No trial'} · {detail.whatsappIncluded ? 'WhatsApp included' : 'WhatsApp not included'}</div>
-            <div>{detail.libraries} assigned {detail.libraries === 1 ? 'library' : 'libraries'}</div>
-            <div>
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>Enabled features</div>
-              {(detail.features || []).length === 0 && <span style={{ color: 'var(--text-tertiary)' }}>None listed.</span>}
-              <ul style={{ margin: 0, paddingLeft: 18 }}>{(detail.features || []).map(f => <li key={f}>{f}</li>)}</ul>
-            </div>
-            {(detail.highlights || []).length > 0 && (
-              <div>
-                <div style={{ fontWeight: 700, marginBottom: 4 }}>Shown to owners</div>
-                <ul style={{ margin: 0, paddingLeft: 18 }}>{detail.highlights.map(f => <li key={f}>{f}</li>)}</ul>
-              </div>
-            )}
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-tertiary)' }}>Catalog prices apply to future public pages, signups, and upgrade quotes. They do not change paid invoices, open invoice amounts, or a library’s current subscription period or price.</p>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              <button type="button" className="btn btn-secondary" onClick={() => { const current = detail; setDetail(null); startEdit(current); }}>Edit</button>
-              <button type="button" className="btn btn-secondary" onClick={() => toggleArchive(detail)}>{detail.active ? 'Archive' : 'Restore'}</button>
-            </div>
-          </div>
-        )}
-      </SaModal>
-
-      <SaModal open={open} title={editing ? `Edit ${form.name || 'plan'}` : 'New plan'} onClose={() => setOpen(false)} maxWidth={720}>
-        <form id="sa-plan-editor" style={{ display: 'flex', flexDirection: 'column', gap: 12 }} onSubmit={save} aria-label="Plan form">
+  if (screen === 'editor') {
+    return (
+      <div id="sa-plan-editor" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={backToCatalog}><ArrowLeft size={14} /> Software plans</button>
+          <h2 style={{ fontSize: 22, fontWeight: 800, margin: '8px 0 0' }}>{editing ? `Edit ${form.name || 'plan'}` : 'New plan'}</h2>
+        </div>
+        <form className="premium-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }} onSubmit={save} aria-label="Plan form">
           <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)' }}>Saving updates this catalog record for future public pages, signups, and upgrade quotes. It does not change paid invoices, open invoice amounts, or a library’s current subscription period or price.</p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))', gap: 12 }}>
             {field('name', 'Name *', 'text', { required: true })}
@@ -287,11 +244,77 @@ export function SoftwarePlansCatalog({ onChanged }) {
           <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!!form.public} onChange={e => setForm(f => ({ ...f, public: e.target.checked }))} /> Offer on owner signup</label>
           <p style={{ margin: 0, fontSize: 12, color: 'var(--text-tertiary)' }}>Lowering a student, seat, staff, or branch limit is rejected when an assigned library already exceeds the new cap. Those libraries are left unchanged. Fixed usage is checked; nonfixed allocation is not part of this catalog.</p>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
+            <button type="button" className="btn btn-secondary" onClick={backToCatalog}>Cancel</button>
             <button type="submit" className="btn btn-primary">Save plan</button>
           </div>
         </form>
-      </SaModal>
+      </div>
+    );
+  }
+
+  return (
+    <div id="sa-software-plans-catalog" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="premium-card" style={{ padding: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 16 }}>Software plans catalog</h3>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>Plans offered to libraries. Assigning a plan to a library is on Library plans.</p>
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={() => startEdit(null)}>+ New plan</button>
+        </div>
+        <FiltersMenu
+          buttonId="sa-software-plans-filters-button"
+          menuId="sa-software-plans-filters-menu"
+          chips={chips}
+          onApply={() => setFilters(draft)}
+          onReset={() => { setDraft(emptyFilters); setFilters(emptyFilters); }}
+          onClose={() => setDraft(filters)}
+        >
+          <label className="form-label" htmlFor="sa-software-plans-status" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>Status
+            <select id="sa-software-plans-status" className="form-select" value={draft.status} onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}>
+              <option value="all">All plans</option>
+              <option value="active">Active</option>
+              <option value="archived">Archived</option>
+            </select>
+          </label>
+          <label className="form-label" htmlFor="sa-software-plans-visibility" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>Visibility
+            <select id="sa-software-plans-visibility" className="form-select" value={draft.visibility} onChange={e => setDraft(d => ({ ...d, visibility: e.target.value }))}>
+              <option value="all">Any visibility</option>
+              <option value="public">Public on signup</option>
+              <option value="hidden">Hidden from signup</option>
+            </select>
+          </label>
+        </FiltersMenu>
+        {shown.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 12 }}>No plans match these filters.</p>}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 260px), 1fr))', gap: 12, marginTop: 12 }}>
+          {shown.map(p => {
+            const features = p.features || [];
+            return (
+              <div key={p.planId} data-plan={p.planId} role="button" tabIndex={0} onClick={() => openDetails(p)} onKeyDown={e => { if (e.key === 'Enter') openDetails(p); }} style={{ border: '1px solid var(--border-light, #e5e7eb)', borderRadius: 8, padding: 12, opacity: p.active ? 1 : 0.7, cursor: 'pointer', textAlign: 'left', minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
+                  <strong style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}><span aria-hidden="true" style={{ fontSize: 18 }}>{p.icon || '◆'}</span><span style={{ overflowWrap: 'anywhere' }}>{p.name}</span></strong>
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{visibilityLabel(p)}</span>
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 700, margin: '6px 0' }}>{inr(p.priceMonthly)}<span style={{ fontSize: 12, fontWeight: 400 }}>/month</span></div>
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{inr(yearlyAmount(p))}<span style={{ fontSize: 12 }}>/year</span>{p.recommended ? <span style={{ fontSize: 11, marginLeft: 6 }}>Recommended</span> : null}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6 }}>Seats: {fmtLimit(p.deskLimit)} · Branches: {fmtLimit(p.branchLimit)} · Staff logins: {fmtLimit(p.staffLimit)} · Students: {fmtLimit(p.studentLimit)}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{p.trialDays ? `${p.trialDays}-day trial` : 'No trial'} · {p.whatsappIncluded ? 'WhatsApp included' : 'WhatsApp not included'}</div>
+                {features.length > 0 && <ul style={{ fontSize: 12, margin: '6px 0 0', paddingLeft: 18 }}>{features.slice(0, 4).map(f => <li key={f}>{f}</li>)}{features.length > 4 && <li>+{features.length - 4} more</li>}</ul>}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{p.libraries} assigned {p.libraries === 1 ? 'library' : 'libraries'}</span>
+                  <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); startEdit(p); }}>Edit</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); toggleArchive(p); }}>{p.active ? 'Archive' : 'Restore'}</button>
+                    {p.libraries === 0
+                      ? <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); remove(p); }}>Delete</button>
+                      : <span style={{ fontSize: 11, color: 'var(--text-tertiary)', alignSelf: 'center' }}>In use — Archive instead</span>}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
