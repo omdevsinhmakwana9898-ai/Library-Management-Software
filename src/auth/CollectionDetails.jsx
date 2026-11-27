@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { ArrowLeft, Search } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../utils/api';
 import { SaModal } from './SaModal';
+import { FiltersMenu } from './FiltersMenu';
 
 const PRESETS = [
   ['last_7_days', 'Last 7 days'],
@@ -46,6 +47,13 @@ const Money = ({ label, value, sub, tone }) => (
   </div>
 );
 
+const KIND_LABEL = { subscription: 'Subscription', upgrade: 'Upgrade', topup: 'Wallet top-up' };
+const presetLabel = (q) => {
+  if (q.preset === 'custom') return `Custom${q.from || q.to ? `: ${q.from || '…'} – ${q.to || '…'}` : ''}`;
+  return PRESETS.find(([id]) => id === q.preset)?.[1] || q.preset;
+};
+const emptyQuery = { preset: 'this_month', q: '', kind: '', status: '', provider: '', from: '', to: '' };
+
 const Field = ({ label, value }) => (
   <div>
     <div style={{ fontSize: 11, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
@@ -57,11 +65,24 @@ export function CollectionDetails({ query, data, loading, onQuery, onBack }) {
   const [draft, setDraft] = useState(query);
   const [open, setOpen] = useState(null);
   const [detail, setDetail] = useState(null);
+  useEffect(() => { setDraft(query); }, [query]);
   const set = (k) => (e) => setDraft(d => ({ ...d, [k]: e.target.value }));
   const apply = (e) => {
     e?.preventDefault();
     onQuery({ ...draft, preset: draft.preset || 'this_month' });
   };
+  const reset = () => {
+    setDraft(emptyQuery);
+    onQuery(emptyQuery);
+  };
+  const chips = [];
+  if ((query.preset || 'this_month') !== 'this_month') {
+    chips.push({ key: 'preset', label: presetLabel(query), onDismiss: () => onQuery({ ...query, preset: 'this_month', from: '', to: '' }) });
+  }
+  if (query.q) chips.push({ key: 'q', label: `Search: ${query.q}`, onDismiss: () => onQuery({ ...query, q: '' }) });
+  if (query.kind) chips.push({ key: 'kind', label: KIND_LABEL[query.kind] || query.kind, onDismiss: () => onQuery({ ...query, kind: '' }) });
+  if (query.status) chips.push({ key: 'status', label: query.status, onDismiss: () => onQuery({ ...query, status: '' }) });
+  if (query.provider) chips.push({ key: 'provider', label: query.provider, onDismiss: () => onQuery({ ...query, provider: '' }) });
   const inspect = async (row) => {
     setOpen(row);
     setDetail(null);
@@ -79,48 +100,51 @@ export function CollectionDetails({ query, data, loading, onQuery, onBack }) {
           <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0', maxWidth: 720 }}>{data?.definition}</p>
         </div>
       </div>
-      <form onSubmit={apply} className="premium-card" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      <FiltersMenu
+        buttonId="sa-collection-filters-button"
+        menuId="sa-collection-filters-menu"
+        chips={chips}
+        onApply={apply}
+        onReset={reset}
+        onClose={() => setDraft(query)}
+        applyDisabled={loading}
+      >
+        <div role="group" aria-label="Date range" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {PRESETS.map(([id, label]) => (
-            <button key={id} type="button" className={`btn btn-sm ${draft.preset === id ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setDraft(d => ({ ...d, preset: id }))}>{label}</button>
+            <button key={id} type="button" className={`btn btn-sm ${draft.preset === id ? 'btn-primary' : 'btn-secondary'}`} style={{ justifyContent: 'flex-start', width: '100%' }} aria-pressed={draft.preset === id} onClick={() => setDraft(d => ({ ...d, preset: id }))}>{label}</button>
           ))}
         </div>
         {draft.preset === 'custom' && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <label className="form-label" style={{ margin: 0 }}>From<input className="form-input" type="date" value={draft.from || ''} onChange={set('from')} required /></label>
-            <label className="form-label" style={{ margin: 0 }}>To<input className="form-input" type="date" value={draft.to || ''} onChange={set('to')} required /></label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <label className="form-label" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>From<input className="form-input" type="date" value={draft.from || ''} onChange={set('from')} required /></label>
+            <label className="form-label" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>To<input className="form-input" type="date" value={draft.to || ''} onChange={set('to')} required /></label>
           </div>
         )}
-        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
-          <label className="form-label" style={{ margin: 0 }}>Search
-            <input className="form-input" value={draft.q || ''} onChange={set('q')} placeholder="Library, owner, transaction, receipt" />
-          </label>
-          <label className="form-label" style={{ margin: 0 }}>Payment type
-            <select className="form-input" value={draft.kind || ''} onChange={set('kind')}>
-              <option value="">All types</option>
-              <option value="subscription">Subscription</option>
-              <option value="upgrade">Upgrade</option>
-              <option value="topup">Wallet top-up</option>
-            </select>
-          </label>
-          <label className="form-label" style={{ margin: 0 }}>Status
-            <select className="form-input" value={draft.status || ''} onChange={set('status')}>
-              <option value="">All statuses</option>
-              {(data?.facets?.statuses || ['paid', 'open', 'settling', 'void', 'past_due', 'requires_recovery']).map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </label>
-          <label className="form-label" style={{ margin: 0 }}>Provider
-            <select className="form-input" value={draft.provider || ''} onChange={set('provider')}>
-              <option value="">All providers</option>
-              {(data?.facets?.providers || []).map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </label>
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button className="btn btn-primary btn-sm" type="submit" disabled={loading}><Search size={14} /> Apply</button>
-          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{data?.range?.from ? `${data.range.from} to ${data.range.to}` : 'All time'} · {data?.timezone || 'Asia/Kolkata'}. Totals follow the date range. Search and filters change the list.</span>
-        </div>
-      </form>
+        <label className="form-label" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>Search
+          <input className="form-input" value={draft.q || ''} onChange={set('q')} placeholder="Library, owner, transaction, receipt" />
+        </label>
+        <label className="form-label" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>Payment type
+          <select className="form-input" value={draft.kind || ''} onChange={set('kind')}>
+            <option value="">All types</option>
+            <option value="subscription">Subscription</option>
+            <option value="upgrade">Upgrade</option>
+            <option value="topup">Wallet top-up</option>
+          </select>
+        </label>
+        <label className="form-label" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>Status
+          <select className="form-input" value={draft.status || ''} onChange={set('status')}>
+            <option value="">All statuses</option>
+            {(data?.facets?.statuses || ['paid', 'open', 'settling', 'void', 'past_due', 'requires_recovery']).map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </label>
+        <label className="form-label" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>Provider
+          <select className="form-input" value={draft.provider || ''} onChange={set('provider')}>
+            <option value="">All providers</option>
+            {(data?.facets?.providers || []).map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </label>
+      </FiltersMenu>
+      <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0 }}>{data?.range?.from ? `${data.range.from} to ${data.range.to}` : 'All time'} · {data?.timezone || 'Asia/Kolkata'}. Totals follow the date range. Search and filters change the list.</p>
       {loading && !data && <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>Loading collection details…</p>}
       {t && (
         <>
