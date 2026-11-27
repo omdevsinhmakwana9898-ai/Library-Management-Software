@@ -62,4 +62,11 @@ test('collection details separates cash, top-ups, pending, and refunds', () => {
   assert.match(details, /Collection details/);
   assert.doesNotMatch(details, /SaModal/);
   assert.match(details, /if \(record\)/);
+  assert.match(details, /SaPageHeader/);
+  assert.match(details, /SaSummaryCard/);
+  assert.match(details, /SaStatusBadge/);
+  assert.match(details, /SaEmpty/);
+  assert.doesNotMatch(details, />\{s\}</);
+  assert.match(details, /status=\{row\.status\}/);
+  assert.doesNotMatch(details, />\{row\.status\}</);
 });
