@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
-import { SaPage, SaPageHeader } from '../saPage';
+import { SaHelper, SaPage, SaPageHeader } from '../saPage';
 import { inr } from './shared';
 
 const empty = { libraryId: '', kind: 'initial', saleRef: '', saleAmount: '' };
@@ -29,8 +29,8 @@ export function SaleRecordPage({ libraries, onBack, onRecorded }) {
         onBack={onBack}
         backLabel="Commission records"
         title="Record a software sale"
-        subtitle="Until billing is connected, record the sale here. The commission rate is frozen at this moment. Saving a later rule does not rewrite this record."
       />
+      <SaHelper>Until billing is connected, record the sale here. The commission rate is frozen at this moment. Saving a later rule does not rewrite this record.</SaHelper>
       <form className="premium-card" style={{ padding: 16, display: 'grid', gap: 12, maxWidth: 560 }} onSubmit={submit}>
         <label className="form-label" style={{ margin: 0 }}>Library
           <select className="form-select" required value={sale.libraryId} onChange={set('libraryId')}>

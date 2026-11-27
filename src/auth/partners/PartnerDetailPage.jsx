@@ -2,8 +2,11 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Power } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
-import { SaEmpty, SaFact, SaFactList, SaPage, SaPageHeader, SaStatusBadge, SaSummaryCard, SaSummaryGrid } from '../saPage';
-import { PERM_LABEL, RuleEditor, kindLabel, ruleText } from './shared';
+import {
+  SaEmpty, SaFact, SaHelper, SaMoreInfo, SaPage, SaPageHeader, SaRecordActions,
+  SaRecordHero, SaRecordSection, SaRecordTimeline, SaStatusBadge,
+} from '../saPage';
+import { PERM_LABEL, RuleEditor, formatRecordDate, kindLabel, plainRate } from './shared';
 
 export function PartnerDetailPage({ partnerId, onOpen }) {
   const [p, setP] = useState(null);
@@ -36,56 +39,61 @@ export function PartnerDetailPage({ partnerId, onOpen }) {
     );
   }
   const libraries = p.assignedLibraries || [];
+  const dates = [
+    p.createdAt ? { label: 'Created', at: formatRecordDate(p.createdAt) } : null,
+  ].filter(step => step?.at);
   return (
     <SaPage id="sa-partner-detail">
       <SaPageHeader
         onBack={() => onOpen('directory')}
         backLabel="Directory"
         title={p.name}
-        subtitle={`${kindLabel(p.kind)} · ${p.email}`}
-        actions={<button type="button" className="btn btn-secondary" onClick={toggle}><Power size={14} /> {p.status === 'Active' ? 'Disable' : 'Enable'}</button>}
       />
-      <div className="sa-action-row">
-        <SaStatusBadge status={p.status} />
-        <SaStatusBadge status={p.kind === 'agent' ? 'open' : 'active'}>{kindLabel(p.kind)}</SaStatusBadge>
-        <SaStatusBadge status={p.emailVerified ? 'active' : 'pending'}>{p.emailVerified ? 'Verified email' : 'Email not verified'}</SaStatusBadge>
-      </div>
-      <SaSummaryGrid>
-        <SaSummaryCard label="Assigned libraries" value={libraries.length} sub={libraries.length === 1 ? 'Managing partner' : 'Libraries they manage'} tone="#eff6ff" />
-        <SaSummaryCard label="New sale rule" value={ruleText(p.rules?.initial)} sub="Frozen on each new sale" tone="#ecfdf5" />
-        <SaSummaryCard label="Renewal rule" value={ruleText(p.rules?.renewal)} sub="Frozen on each renewal" />
-      </SaSummaryGrid>
-      <div className="sa-action-row">
-        <button type="button" className="btn btn-secondary" onClick={() => onOpen('commissions', { partnerId: p.id })}>Commission records</button>
-        <button type="button" className="btn btn-secondary" onClick={() => onOpen('assignments')}>Assignment / transfer</button>
-      </div>
-      <div className="premium-card" style={{ padding: 16, display: 'grid', gap: 10 }}>
-        <strong style={{ fontSize: 16 }}>Permissions</strong>
+      <SaRecordHero
+        name={p.name}
+        badge={(
+          <>
+            <SaStatusBadge status={p.kind === 'agent' ? 'open' : 'active'}>{kindLabel(p.kind)}</SaStatusBadge>
+            <SaStatusBadge status={p.status} />
+          </>
+        )}
+      />
+      <SaRecordTimeline steps={dates} />
+      <SaRecordSection title="Contact">
+        <SaFact label="Email">{p.email || '—'}</SaFact>
+        <SaFact label="Phone">{p.phone || '—'}</SaFact>
+        <SaFact label="Login email">{p.emailVerified ? 'Verified' : 'Not verified'}</SaFact>
+      </SaRecordSection>
+      <SaRecordSection title="Assignment and commission rules">
+        <SaFact label="Assigned libraries">{libraries.length ? libraries.map(l => l.name).join(', ') : 'None'}</SaFact>
+        <SaFact label="Original seller on">{p.originalSales?.length ? p.originalSales.map(l => l.name).join(', ') : 'None'}</SaFact>
+        <SaFact label="New sale">{p.rules?.initial ? plainRate(p.rules.initial) : 'No rule yet'}</SaFact>
+        <SaFact label="Renewal">{p.rules?.renewal ? plainRate(p.rules.renewal) : 'No rule yet'}</SaFact>
+        <div style={{ gridColumn: '1 / -1', display: 'grid', gap: 10 }}>
+          <RuleEditor key={`${p.id}-i-${p.rules?.initial?.version}`} p={p} appliesTo="initial" onSaved={load} />
+          <RuleEditor key={`${p.id}-r-${p.rules?.renewal?.version}`} p={p} appliesTo="renewal" onSaved={load} />
+        </div>
+      </SaRecordSection>
+      <SaRecordSection title="Permissions">
         {Object.keys(PERM_LABEL).map(k => (
           <label key={k} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14 }}>
             <input type="checkbox" checked={!!p.permissions?.[k]} onChange={() => perm(k)} />
             {PERM_LABEL[k]}
           </label>
         ))}
-      </div>
-      <div className="premium-card" style={{ padding: 16, display: 'grid', gap: 10 }}>
-        <strong style={{ fontSize: 16 }}>Current commission rules</strong>
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>Saving a rule starts a new version. Old commission records keep the rate frozen at sale time.</p>
-        <RuleEditor key={`${p.id}-i-${p.rules?.initial?.version}`} p={p} appliesTo="initial" onSaved={load} />
-        <RuleEditor key={`${p.id}-r-${p.rules?.renewal?.version}`} p={p} appliesTo="renewal" onSaved={load} />
-      </div>
-      {libraries.length === 0 ? (
-        <SaEmpty title="No assigned libraries">This account is not the managing partner of a library.</SaEmpty>
-      ) : (
-        <SaFactList>
-          <SaFact label="Assigned libraries">{libraries.map(l => l.name).join(', ')}</SaFact>
-        </SaFactList>
-      )}
-      {!!p.originalSales?.length && (
-        <SaFactList>
-          <SaFact label="Original seller on">{p.originalSales.map(l => l.name).join(', ')}</SaFact>
-        </SaFactList>
-      )}
+      </SaRecordSection>
+      <SaMoreInfo>
+        <SaFact label="Partner id">{p.id || '—'}</SaFact>
+        {libraries.map(l => (
+          <SaFact key={l.libraryId} label={`${l.name} id`}>{l.libraryId}</SaFact>
+        ))}
+      </SaMoreInfo>
+      <SaHelper>Saving a commission rule starts a new version. Records already saved keep the rate from that sale.</SaHelper>
+      <SaRecordActions>
+        <button type="button" className="btn btn-secondary" onClick={() => onOpen('commissions', { partnerId: p.id })}>Commission records</button>
+        <button type="button" className="btn btn-secondary" onClick={() => onOpen('assignments')}>Assignment / transfer</button>
+        <button type="button" className="btn btn-secondary" onClick={toggle}><Power size={14} /> {p.status === 'Active' ? 'Disable' : 'Enable'}</button>
+      </SaRecordActions>
     </SaPage>
   );
 }

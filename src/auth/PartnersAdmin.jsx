@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../utils/api';
 import { SaPage, SaPageHeader } from './saPage';
 import { DirectoryPage } from './partners/DirectoryPage';
+import { PartnerCreatePage } from './partners/PartnerCreatePage';
 import { PartnerDetailPage } from './partners/PartnerDetailPage';
 import { AssignmentsPage } from './partners/AssignmentsPage';
 import { CommissionsPage } from './partners/CommissionsPage';
@@ -36,6 +37,7 @@ export function PartnersAdmin({ libraries, onChanged }) {
     setPage(next);
   };
   if (page === 'directory') return <DirectoryPage libraries={libraries} onOpen={open} onChanged={onChanged} />;
+  if (page === 'create') return <PartnerCreatePage onOpen={open} onChanged={onChanged} />;
   if (page === 'detail' && partnerId) return <PartnerDetailPage partnerId={partnerId} onOpen={open} />;
   if (page === 'assignments') return <AssignmentsPage libraries={libraries} onOpen={open} onChanged={onChanged} />;
   if (page === 'commissions') return <CommissionsPage libraries={libraries} onOpen={open} onChanged={onChanged} seed={commissionSeed} />;

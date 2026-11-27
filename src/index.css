@@ -1277,6 +1277,16 @@ body {
   overflow-wrap: anywhere;
 }
 .sa-summary-sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.4; }
+.sa-partner-summary-compact .sa-summary-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.sa-partner-summary-compact .sa-summary-card { padding: 8px 10px; }
+.sa-partner-summary-compact .sa-summary-label { font-size: 11px; line-height: 1.3; }
+.sa-partner-summary-compact .sa-summary-value { font-size: 16px; margin-top: 2px; }
+@media (min-width: 720px) {
+  .sa-partner-summary-compact .sa-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
 .sa-empty { padding: 28px 20px; }
 .sa-empty strong { display: block; font-size: 15px; }
 .sa-empty p { margin: 6px 0 0; font-size: 13px; color: var(--text-secondary); line-height: 1.45; }

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
 import { DatePeriodSelect, FiltersMenu, datePeriodLabel } from '../FiltersMenu';
-import { SaEmpty, SaList, SaListRow, SaPage, SaPageHeader, SaStatusBadge, SaSummaryCard, SaSummaryGrid } from '../saPage';
+import { SaEmpty, SaHelper, SaList, SaListRow, SaPage, SaPageHeader, SaStatusBadge, SaSummaryCard, SaSummaryGrid } from '../saPage';
 import { Pager, inr, qs } from './shared';
 
 const empty = { q: '', partnerId: '', libraryId: '', preset: 'all_time', from: '', to: '', page: 1 };
@@ -35,12 +35,11 @@ export function PayoutNotesPage({ libraries, onOpen }) {
         onBack={() => onOpen('landing')}
         backLabel="Partners & Commissions"
         title="Outside payout notes"
-        subtitle="Each row is a tracking / bookkeeping note that an outside payout was recorded. Nothing here is a bank transfer or a payment executed in the app. Commission amounts and frozen rates are unchanged."
       />
+      <SaHelper>Each row is a tracking note, not a bank transfer and not a payment executed in the app.</SaHelper>
       <SaSummaryGrid>
         <SaSummaryCard label="Notes" value={data?.total ?? '…'} sub="Matching this filter" />
         <SaSummaryCard label="On this page" value={items.length} sub={data?.page ? `Page ${data.page}` : '—'} tone="#eff6ff" />
-        <SaSummaryCard label="Payment in the app" value="No" sub="Bookkeeping only" tone="#fff7ed" />
       </SaSummaryGrid>
       <FiltersMenu
         buttonId="sa-payout-records-filters-button"
@@ -77,11 +76,10 @@ export function PayoutNotesPage({ libraries, onOpen }) {
           </select>
         </label>
       </FiltersMenu>
-      <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>{data?.note} {data?.paymentExecuted === false ? 'No payment was executed.' : ''}</p>
       {loading && items.length === 0 && <p style={{ margin: 0, fontSize: 14, color: 'var(--text-secondary)' }}>Loading…</p>}
       {!loading && items.length === 0 && (
         <SaEmpty title="No outside payout notes yet">
-          Open a commission record to save a tracking note. That note does not move money.
+          Open a commission record to save a tracking note.
         </SaEmpty>
       )}
       {items.length > 0 && (

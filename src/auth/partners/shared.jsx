@@ -27,11 +27,6 @@ export const requirementCopy = (label) => ({
 export const rateText = (basis) => (basis?.mode === 'percent' ? `${basis.value}%` : basis?.value != null ? inr(basis.value) : '—');
 export const ruleText = (rule) => (rule ? `${rule.mode === 'percent' ? `${rule.value}%` : inr(rule.value)} v${rule.version}` : 'None');
 
-export const permText = (p) => {
-  const on = Object.keys(PERM_LABEL).filter(k => p.permissions?.[k]).map(k => PERM_LABEL[k]);
-  return on.length ? on.join(', ') : 'No extra permissions';
-};
-
 export const qs = (o) => {
   const p = new URLSearchParams();
   Object.entries(o).forEach(([k, v]) => {
@@ -42,14 +37,32 @@ export const qs = (o) => {
   return s ? `?${s}` : '';
 };
 
-export function SummaryCards({ summary }) {
+export function formatRecordDate(value) {
+  if (value == null || value === '') return null;
+  const raw = String(value);
+  const ymd = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const date = ymd
+    ? new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]))
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** Plain-language rate. Version is the frozen or current rule version, not an internal id. */
+export function plainRate(basis) {
+  if (basis?.value == null) return 'No rate';
+  const amount = basis.mode === 'percent' ? `${basis.value}% of the sale` : `${inr(basis.value)} fixed`;
+  return basis.version ? `${amount}, version ${basis.version}` : amount;
+}
+
+export function SummaryCards({ summary, compact = false }) {
   return (
-    <div id="sa-partner-summary">
+    <div id="sa-partner-summary" className={compact ? 'sa-partner-summary-compact' : undefined}>
       <SaSummaryGrid>
-        <SaSummaryCard label="Active partners" value={summary?.activePartners ?? '…'} sub="Partners and agents with status Active" />
-        <SaSummaryCard label="Assigned libraries" value={summary?.assignedLibraries ?? '…'} sub="Libraries with a managing partner" tone="#eff6ff" />
-        <SaSummaryCard label="Earned commission" value={summary ? inr(summary.earnedCommission) : '…'} sub={summary ? `${summary.earnedCount} earned records` : 'Earned records'} tone="#ecfdf5" />
-        <SaSummaryCard label="Unpaid commission" value={summary ? inr(summary.unpaidCommission) : '…'} sub="Earned records that are still unpaid" tone="#fff7ed" />
+        <SaSummaryCard label="Active partners" value={summary?.activePartners ?? '…'} sub={compact ? null : 'Partners and agents with status Active'} />
+        <SaSummaryCard label="Assigned libraries" value={summary?.assignedLibraries ?? '…'} sub={compact ? null : 'Libraries with a managing partner'} tone="#eff6ff" />
+        <SaSummaryCard label="Earned commission" value={summary ? inr(summary.earnedCommission) : '…'} sub={compact ? null : (summary ? `${summary.earnedCount} earned records` : 'Earned records')} tone="#ecfdf5" />
+        <SaSummaryCard label="Unpaid commission" value={summary ? inr(summary.unpaidCommission) : '…'} sub={compact ? null : 'Earned records that are still unpaid'} tone="#fff7ed" />
       </SaSummaryGrid>
     </div>
   );

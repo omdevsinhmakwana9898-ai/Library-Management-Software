@@ -2,18 +2,17 @@ import React, { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
 import { DatePeriodSelect, FiltersMenu, datePeriodLabel } from '../FiltersMenu';
-import { SaEmpty, SaList, SaListRow, SaPage, SaPageHeader, SaStatusBadge } from '../saPage';
-import { Pager, PERM_LABEL, SummaryCards, kindLabel, permText, qs, ruleText } from './shared';
+import { SaEmpty, SaHelper, SaList, SaListRow, SaPage, SaPageHeader, SaStatusBadge } from '../saPage';
+import { Pager, SummaryCards, kindLabel, qs } from './shared';
 
 const empty = { q: '', partnerId: '', libraryId: '', kind: '', status: '', preset: 'all_time', from: '', to: '', page: 1 };
 
-export function DirectoryPage({ libraries, onOpen, onChanged }) {
+export function DirectoryPage({ libraries, onOpen }) {
   const [query, setQuery] = useState(empty);
   const [draft, setDraft] = useState(empty);
   const [data, setData] = useState(null);
   const [options, setOptions] = useState([]);
   const [summary, setSummary] = useState(null);
-  const [form, setForm] = useState({ kind: 'partner', name: '', email: '' });
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async (next) => {
@@ -46,17 +45,6 @@ export function DirectoryPage({ libraries, onOpen, onChanged }) {
     query.status && { key: 'status', label: query.status, onDismiss: () => setQuery({ ...query, status: '', page: 1 }) },
   ].filter(Boolean);
 
-  const create = async (e) => {
-    e.preventDefault();
-    try {
-      const r = await api.adminCreatePartner(form);
-      toast.success(r.generatedPassword ? `Created. Temporary password (shown once): ${r.generatedPassword}` : 'Created', { duration: 15000 });
-      setForm({ kind: form.kind, name: '', email: '' });
-      load(query);
-      onChanged?.();
-    } catch (err) { toast.error(err.message); }
-  };
-
   const items = data?.items || [];
   return (
     <SaPage id="sa-partners-directory">
@@ -64,25 +52,10 @@ export function DirectoryPage({ libraries, onOpen, onChanged }) {
         onBack={() => onOpen('landing')}
         backLabel="Partners & Commissions"
         title="Partners and agents"
-        subtitle="Type, login email, status, permissions, assigned libraries, and the current commission rules. Open a person for the detail page."
+        actions={<button type="button" className="btn btn-primary" onClick={() => onOpen('create')}>Add partner or agent</button>}
       />
-      <SummaryCards summary={summary} />
-      <form className="premium-card" style={{ padding: 16, display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', alignItems: 'end' }} onSubmit={create}>
-        <strong style={{ gridColumn: '1 / -1', fontSize: 16 }}>Add partner or agent</strong>
-        <label className="form-label" style={{ margin: 0 }}>Type
-          <select className="form-select" value={form.kind} onChange={e => setForm(f => ({ ...f, kind: e.target.value }))}>
-            <option value="partner">Partner (manages clients)</option>
-            <option value="agent">Agent (sales/referrals)</option>
-          </select>
-        </label>
-        <label className="form-label" style={{ margin: 0 }}>Name
-          <input className="form-input" required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-        </label>
-        <label className="form-label" style={{ margin: 0 }}>Login email
-          <input className="form-input" type="email" required value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-        </label>
-        <button className="btn btn-primary" type="submit">Create</button>
-      </form>
+      <SummaryCards summary={summary} compact />
+      <SaHelper>The period filter uses the date the account was created. Open a person to change permissions.</SaHelper>
       <FiltersMenu
         buttonId="sa-partners-filters-button"
         menuId="sa-partners-filters-menu"
@@ -129,11 +102,10 @@ export function DirectoryPage({ libraries, onOpen, onChanged }) {
           </select>
         </label>
       </FiltersMenu>
-      <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>Period filters by the date the partner or agent was created. {data?.total ?? 0} matches.</p>
       {loading && items.length === 0 && <p style={{ margin: 0, fontSize: 14, color: 'var(--text-secondary)' }}>Loading…</p>}
       {!loading && items.length === 0 && (
         <SaEmpty title="No partners or agents match">
-          Clear a filter, or add a partner or agent above.
+          Clear a filter, or add a partner or agent.
         </SaEmpty>
       )}
       {items.length > 0 && (
@@ -142,13 +114,11 @@ export function DirectoryPage({ libraries, onOpen, onChanged }) {
             <SaListRow
               key={p.id}
               title={p.name}
-              meta={`${kindLabel(p.kind)} · ${p.email}`}
-              extra={`${p.emailVerified ? 'Verified login email' : 'Login email not verified'} · ${permText(p)} · ${p.assignedLibraries?.length ? p.assignedLibraries.map(l => l.name).join(', ') : 'No assigned libraries'} · New sale ${ruleText(p.rules?.initial)} · Renewal ${ruleText(p.rules?.renewal)}`}
+              meta={p.email}
               onClick={() => onOpen('detail', p.id)}
               badge={(
                 <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   <SaStatusBadge status={p.kind === 'agent' ? 'open' : 'active'}>{kindLabel(p.kind)}</SaStatusBadge>
-                  <SaStatusBadge status={p.emailVerified ? 'active' : 'pending'}>{p.emailVerified ? 'Verified' : 'Not verified'}</SaStatusBadge>
                   <SaStatusBadge status={p.status} />
                 </span>
               )}
@@ -157,7 +127,6 @@ export function DirectoryPage({ libraries, onOpen, onChanged }) {
         </SaList>
       )}
       <Pager page={query.page} pages={data?.pages} loading={loading} onPage={(page) => setQuery({ ...query, page })} />
-      <p style={{ margin: 0, fontSize: 12, color: 'var(--text-tertiary)' }}>Permissions you can grant: {Object.values(PERM_LABEL).join(', ')}. Change them on the person’s page.</p>
     </SaPage>
   );
 }
