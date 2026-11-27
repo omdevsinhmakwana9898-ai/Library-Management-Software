@@ -2,7 +2,19 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Building2, Eye, KeyRound, Power, Trash2, UserPlus, BarChart3 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../utils/api';
-import { SaEmpty, SaFact, SaFactList, SaPage, SaPageHeader, SaStatusBadge, SaSummaryCard, SaSummaryGrid } from './saPage';
+import {
+  SaEmpty,
+  SaFact,
+  SaHelper,
+  SaMoreInfo,
+  SaPage,
+  SaPageHeader,
+  SaRecordActions,
+  SaRecordHero,
+  SaRecordSection,
+  SaRecordTimeline,
+  SaStatusBadge,
+} from './saPage';
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 const fmtStamp = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never');
@@ -73,6 +85,11 @@ export function LibraryDetails({ libraryId, onBack, onOpenLibrary, onInvite, onR
   }
 
   const disabling = library.status === 'Active';
+  const dates = [
+    library.createdAt ? { label: 'Created', at: fmtDate(library.createdAt) } : null,
+    library.expiry ? { label: 'Plan ends', at: fmtDate(library.expiry) } : null,
+    library.lastActiveAt ? { label: 'Last active', at: fmtStamp(library.lastActiveAt) } : null,
+  ].filter(Boolean);
 
   return (
     <SaPage id="sa-library-details">
@@ -80,50 +97,62 @@ export function LibraryDetails({ libraryId, onBack, onOpenLibrary, onInvite, onR
         onBack={onBack}
         backLabel="Library directory"
         title={library.name}
-        subtitle={library.city || 'City not set'}
-        actions={<button type="button" className="btn btn-primary" onClick={() => onAnalytics(library)}><BarChart3 size={16} /> Library analytics</button>}
       />
 
-      <SaSummaryGrid>
-        <SaSummaryCard label="Software Plan" value={library.planName || 'No plan'} sub={library.trial ? <SaStatusBadge status="trial">Trial</SaStatusBadge> : 'Current software plan'} tone="#eff6ff" />
-        <SaSummaryCard label="Plan Expiry" value={fmtDate(library.expiry)} sub={library.subscriptionLabel || 'Subscription status'} tone="#fffbeb" />
-        <SaSummaryCard label="Account Status" value={<SaStatusBadge status={library.accountStatus} />} sub={library.subscriptionLabel || '—'} />
-      </SaSummaryGrid>
+      <SaRecordHero
+        name={library.name}
+        status={library.accountStatus}
+        badge={(
+          <>
+            <SaStatusBadge status={library.accountStatus} />
+            {library.trial ? <SaStatusBadge status="trial">Trial</SaStatusBadge> : null}
+          </>
+        )}
+      />
+      <SaRecordTimeline steps={dates} />
 
-      <SaFactList>
+      <SaRecordSection title="Plan">
+        <SaFact label="Software Plan">{library.planName || 'No plan'}</SaFact>
+        <SaFact label="Plan Expiry">{fmtDate(library.expiry)}</SaFact>
+        <SaFact label="Subscription">{library.subscriptionLabel || '—'}</SaFact>
+      </SaRecordSection>
+
+      <SaRecordSection title="Owner">
         <SaFact label="Owner Name">{library.owner?.name || '—'}</SaFact>
+        <SaFact label="Mobile">{library.mobile || '—'}</SaFact>
+        <SaFact label="Email">{library.email || '—'}</SaFact>
+        <SaFact label="Assigned Partner">{library.assignedPartner || '—'}</SaFact>
+        <SaFact label="Last Active">{fmtStamp(library.lastActiveAt)}</SaFact>
         <SaFact label="City">
           <form onSubmit={saveCity} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 4 }}>
             <input className="form-input" aria-label="City" value={city} onChange={e => setCity(e.target.value)} style={{ maxWidth: 220, minWidth: 0, flex: '1 1 140px' }} />
             <button className="btn btn-secondary btn-sm" type="submit" disabled={savingCity}>{savingCity ? 'Saving…' : 'Save'}</button>
           </form>
         </SaFact>
-        <SaFact label="Mobile">{library.mobile || '—'}</SaFact>
-        <SaFact label="Email">{library.email || '—'}</SaFact>
-        <SaFact label="Assigned Partner">{library.assignedPartner || '—'}</SaFact>
-        <SaFact label="Account Status"><SaStatusBadge status={library.accountStatus} /></SaFact>
-        <SaFact label="Subscription Status">{library.planName ? `${library.planName} · ` : ''}{library.subscriptionLabel}</SaFact>
-        <SaFact label="Plan Expiry">{fmtDate(library.expiry)}</SaFact>
-        <SaFact label="Last Active">{fmtStamp(library.lastActiveAt)}</SaFact>
-      </SaFactList>
+      </SaRecordSection>
 
-      <div className="premium-card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <strong style={{ fontSize: 16 }}>Library actions</strong>
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>These actions apply only to {library.name}. View Only opens the owner workspace without saving changes. Access Library opens the same workspace with write access.</p>
-        <div className="sa-action-row">
-          <button type="button" className="btn btn-secondary" onClick={() => onOpenLibrary(library, true)}><Eye size={16} /> View Only</button>
-          <button type="button" className="btn btn-primary" onClick={() => onOpenLibrary(library, false)}><Building2 size={16} /> Access Library</button>
-          <button type="button" className="btn btn-secondary" onClick={() => onInvite(library)}><UserPlus size={16} /> Manage Staff</button>
-          <button type="button" className="btn btn-secondary" onClick={() => onReset(library)}><KeyRound size={16} /> Assisted password reset</button>
-          <button type="button" className="btn btn-secondary" onClick={() => { setReason(''); setStatusOpen(true); }}><Power size={16} /> {disabling ? 'Disable library' : 'Enable library'}</button>
-        </div>
-      </div>
+      <SaMoreInfo>
+        <SaFact label="Library id">{library.libraryId || '—'}</SaFact>
+        {library.planId ? <SaFact label="Plan id">{library.planId}</SaFact> : null}
+        {library.subscriptionRaw ? <SaFact label="Subscription code">{library.subscriptionRaw}</SaFact> : null}
+      </SaMoreInfo>
+
+      <SaHelper>View Only opens this library without saving. Access Library can make changes. Disable only blocks sign-in.</SaHelper>
 
       <div className="premium-card" style={{ padding: 18, border: '1px solid #fecaca', background: '#fff1f2' }}>
         <h3 style={{ margin: '0 0 6px', fontSize: 22, color: '#991b1b' }}>Delete Library</h3>
         <p style={{ margin: '0 0 12px', fontSize: 14, color: '#7f1d1d', maxWidth: 640 }}>Permanently deletes {library.name} and its students, payments, settings and staff accounts. This cannot be undone. Other libraries are not affected. To only block sign-in, use Disable library.</p>
         <button type="button" className="btn btn-danger" onClick={() => onDelete(library)}><Trash2 size={18} /> Delete Library</button>
       </div>
+
+      <SaRecordActions>
+        <button type="button" className="btn btn-secondary" onClick={() => onAnalytics(library)}><BarChart3 size={16} /> Library analytics</button>
+        <button type="button" className="btn btn-secondary" onClick={() => onOpenLibrary(library, true)}><Eye size={16} /> View Only</button>
+        <button type="button" className="btn btn-primary" onClick={() => onOpenLibrary(library, false)}><Building2 size={16} /> Access Library</button>
+        <button type="button" className="btn btn-secondary" onClick={() => onInvite(library)}><UserPlus size={16} /> Manage Staff</button>
+        <button type="button" className="btn btn-secondary" onClick={() => onReset(library)}><KeyRound size={16} /> Assisted password reset</button>
+        <button type="button" className="btn btn-secondary" onClick={() => { setReason(''); setStatusOpen(true); }}><Power size={16} /> {disabling ? 'Disable library' : 'Enable library'}</button>
+      </SaRecordActions>
 
       {statusOpen && (
         <div className="modal-overlay" role="dialog" aria-modal="true" aria-label={disabling ? 'Disable library' : 'Enable library'} onClick={() => !savingStatus && setStatusOpen(false)}>

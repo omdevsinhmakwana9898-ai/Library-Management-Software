@@ -46,6 +46,9 @@ test('platform insights overview keeps libraries and students only', () => {
 
 test('library details keeps plan cards and the existing management actions', () => {
   assert.match(details, /id="sa-library-details"/);
+  assert.match(details, /SaRecordHero/);
+  assert.match(details, /SaRecordTimeline/);
+  assert.match(details, /SaMoreInfo/);
   assert.match(details, /Software Plan/);
   assert.match(details, /Plan Expiry/);
   assert.match(details, /View Only/);
