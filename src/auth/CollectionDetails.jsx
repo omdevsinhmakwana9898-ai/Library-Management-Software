@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../utils/api';
-import { SaModal } from './SaModal';
 import { DatePeriodSelect, FiltersMenu, datePeriodLabel } from './FiltersMenu';
 
 export const inrMinor = (minor) => `₹${(Number(minor || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -45,9 +44,47 @@ const Field = ({ label, value }) => (
   </div>
 );
 
+function CollectionRecordPage({ row, detail, onBack }) {
+  const shown = detail || row;
+  return (
+    <div id="sa-collection-record" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onBack}><ArrowLeft size={14} /> Collection details</button>
+        <h2 style={{ fontSize: 22, fontWeight: 800, margin: '8px 0 0' }}>Transaction</h2>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>{shown.libraryName || shown.libraryId || 'Collection record'}</p>
+      </div>
+      {!detail && <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0 }}>Loading this record…</p>}
+      <div className="premium-card" style={{ padding: 16, display: 'grid', gap: 10 }}>
+        <Field label="Invoice" value={shown.invoiceId} />
+        <Field label="Receipt number" value={shown.receiptNo} />
+        <Field label="Receipt" value={shown.receiptUrl || 'No receipt yet'} />
+        {shown.receiptPath && (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => api.downloadFile(shown.receiptPath, `receipt-${shown.receiptNo || shown.invoiceId}.pdf`).catch(e => toast.error(e.message))}>Download receipt</button>
+        )}
+        <Field label="Provider" value={shown.provider} />
+        <Field label="Provider reference" value={shown.providerRef} />
+        <Field label="Provider payment" value={shown.providerPaymentRef} />
+        <Field label="Provider order" value={shown.providerOrderRef} />
+        <Field label="Verification" value={shown.verificationState} />
+        <Field label="Receipt delivery" value={shown.receiptDeliveryStatus || 'Not recorded'} />
+        <Field label="Total" value={inrMinor(shown.totalMinor)} />
+        <Field label="Wallet amount" value={inrMinor(shown.walletMinor)} />
+        <Field label="Gateway cash" value={inrMinor(shown.gatewayMinor)} />
+        <Field label="Counted as software collection" value={inrMinor(shown.collectedMinor)} />
+        <Field label="Library" value={`${shown.libraryName || '—'} (${shown.libraryId || '—'})`} />
+        <Field label="Owner" value={[shown.ownerName, shown.ownerEmail].filter(Boolean).join(' · ') || '—'} />
+        <Field label="Paid" value={fmtDate(shown.paidAt)} />
+        <Field label="Created" value={fmtDate(shown.createdAt)} />
+        <Field label="Due" value={fmtDate(shown.dueAt)} />
+        {shown.projected && <p style={{ fontSize: 13, color: '#92400e', margin: 0 }}>{shown.projectedLabel}</p>}
+      </div>
+    </div>
+  );
+}
+
 export function CollectionDetails({ query, data, loading, onQuery, onBack }) {
   const [draft, setDraft] = useState(query);
-  const [open, setOpen] = useState(null);
+  const [record, setRecord] = useState(null);
   const [detail, setDetail] = useState(null);
   useEffect(() => { setDraft(query); }, [query]);
   const set = (k) => (e) => setDraft(d => ({ ...d, [k]: e.target.value }));
@@ -68,13 +105,21 @@ export function CollectionDetails({ query, data, loading, onQuery, onBack }) {
   if (query.status) chips.push({ key: 'status', label: query.status, onDismiss: () => onQuery({ ...query, status: '' }) });
   if (query.provider) chips.push({ key: 'provider', label: query.provider, onDismiss: () => onQuery({ ...query, provider: '' }) });
   const inspect = async (row) => {
-    setOpen(row);
+    setRecord(row);
     setDetail(null);
     try { setDetail(await api.adminCollectionRecord(row.recordId)); }
     catch (err) { toast.error(err.message || 'Could not load this record'); }
   };
+  if (record) {
+    return (
+      <CollectionRecordPage
+        row={record}
+        detail={detail}
+        onBack={() => { setRecord(null); setDetail(null); }}
+      />
+    );
+  }
   const t = data?.totals;
-  const shown = detail || open;
   return (
     <div id="sa-collection-details" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -176,34 +221,6 @@ export function CollectionDetails({ query, data, loading, onQuery, onBack }) {
           </div>
         </>
       )}
-      <SaModal open={!!open} title="Transaction" onClose={() => { setOpen(null); setDetail(null); }} maxWidth={560}>
-        {shown && (
-          <div style={{ display: 'grid', gap: 10 }}>
-            <Field label="Invoice" value={shown.invoiceId} />
-            <Field label="Receipt number" value={shown.receiptNo} />
-            <Field label="Receipt" value={shown.receiptUrl || 'No receipt yet'} />
-            {shown.receiptPath && (
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => api.downloadFile(shown.receiptPath, `receipt-${shown.receiptNo || shown.invoiceId}.pdf`).catch(e => toast.error(e.message))}>Download receipt</button>
-            )}
-            <Field label="Provider" value={shown.provider} />
-            <Field label="Provider reference" value={shown.providerRef} />
-            <Field label="Provider payment" value={shown.providerPaymentRef} />
-            <Field label="Provider order" value={shown.providerOrderRef} />
-            <Field label="Verification" value={shown.verificationState} />
-            <Field label="Receipt delivery" value={shown.receiptDeliveryStatus || 'Not recorded'} />
-            <Field label="Total" value={inrMinor(shown.totalMinor)} />
-            <Field label="Wallet amount" value={inrMinor(shown.walletMinor)} />
-            <Field label="Gateway cash" value={inrMinor(shown.gatewayMinor)} />
-            <Field label="Counted as software collection" value={inrMinor(shown.collectedMinor)} />
-            <Field label="Library" value={`${shown.libraryName || '—'} (${shown.libraryId || '—'})`} />
-            <Field label="Owner" value={[shown.ownerName, shown.ownerEmail].filter(Boolean).join(' · ') || '—'} />
-            <Field label="Paid" value={fmtDate(shown.paidAt)} />
-            <Field label="Created" value={fmtDate(shown.createdAt)} />
-            <Field label="Due" value={fmtDate(shown.dueAt)} />
-            {shown.projected && <p style={{ fontSize: 13, color: '#92400e', margin: 0 }}>{shown.projectedLabel}</p>}
-          </div>
-        )}
-      </SaModal>
     </div>
   );
 }
