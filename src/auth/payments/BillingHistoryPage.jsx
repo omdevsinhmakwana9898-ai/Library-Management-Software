@@ -5,12 +5,16 @@ import { DatePeriodSelect, FiltersMenu, datePeriodLabel } from '../FiltersMenu';
 import {
   SaEmpty,
   SaFact,
-  SaFactList,
+  SaHelper,
   SaList,
   SaListRow,
+  SaMoreInfo,
   SaPage,
   SaPageHeader,
-  SaStatusBadge,
+  SaRecordActions,
+  SaRecordHero,
+  SaRecordSection,
+  SaRecordTimeline,
   SaSummaryCard,
   SaSummaryGrid,
   providerLabel,
@@ -86,7 +90,7 @@ export function BillingHistoryPage({ onOpen }) {
       />
       <div className="sa-nav-grid">
         {cards.map(([id, title, text]) => (
-          <button key={id} type="button" className="premium-card sa-nav-card" onClick={() => onOpen(id)}>
+          <button key={id} type="button" id={BUCKETS[id].id} className="premium-card sa-nav-card" onClick={() => onOpen(id)}>
             <strong>{title}</strong>
             <span>{text}</span>
             {counts ? <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{counts[id] ?? 0}</span> : null}
@@ -260,47 +264,59 @@ export function BillingRecordPage({ invoiceId, bucket, onOpen, onOpenCollections
     finally { setBusy(false); }
   };
   if (!record) return <SaPage id="sa-billing-record"><p style={{ margin: 0 }}>Loading invoice…</p></SaPage>;
+  const providerRef = record.providerPaymentRef || record.providerRef || record.providerOrderRef || '';
   return (
     <SaPage id="sa-billing-record">
       <SaPageHeader
         onBack={() => onOpen(back)}
         backLabel={backLabel}
         title={record.libraryName || 'Invoice'}
-        subtitle="Amount, status, and receipt for this invoice."
       />
-      <SaSummaryGrid>
-        <SaSummaryCard label="Amount" value={money(record.totalMinor, record.currency)} tone="#eff6ff" />
-        <SaSummaryCard label="Status" value={<SaStatusBadge status={record.status} />} />
-        <SaSummaryCard label="Receipt" value={record.receiptNo || 'No receipt yet'} />
-      </SaSummaryGrid>
-      <SaFactList>
+      <SaRecordHero
+        name={record.libraryName || 'Invoice'}
+        amount={money(record.totalMinor, record.currency)}
+        status={record.status}
+      />
+      <SaRecordTimeline steps={[
+        { label: 'Created', at: record.createdAt ? when(record.createdAt) : null },
+        { label: 'Due', at: record.dueAt ? when(record.dueAt) : null },
+        { label: 'Paid', at: record.paidAt ? when(record.paidAt) : null },
+      ]} />
+      <SaRecordSection title="Payment">
+        <SaFact label="Receipt">{record.receiptNo || 'No receipt yet'}</SaFact>
         <SaFact label="Taxes">{money(record.taxMinor, record.currency)}</SaFact>
-        <SaFact label="Wallet applied">{money(record.walletMinor, record.currency)}</SaFact>
-        <SaFact label="External gateway paid">{money(record.gatewayMinor, record.currency)}</SaFact>
-        <SaFact label="Collected">{record.collected ? 'Yes' : 'No'}</SaFact>
-        <SaFact label="Created">{when(record.createdAt)}</SaFact>
-        <SaFact label="Paid">{when(record.paidAt)}</SaFact>
-        <SaFact label="Due">{when(record.dueAt)}</SaFact>
-        <SaFact label="Invoice">{record.invoiceId}</SaFact>
-        <SaFact label="Provider">{providerLabel(record.provider)}</SaFact>
-        <SaFact label="Provider reference">{record.providerPaymentRef || record.providerRef || record.providerOrderRef || '—'}</SaFact>
-        <SaFact label="Delivery">{statusLabel(record.receiptDelivery?.status || record.delivery?.status || 'not attempted')}</SaFact>
-        <SaFact label="Owner">{[record.ownerName, record.ownerEmail, record.ownerPhone].filter(Boolean).join(' · ') || '—'}</SaFact>
-      </SaFactList>
-      {record.collectedNote && <p style={{ fontSize: 13, margin: 0 }}>{record.collectedNote}</p>}
-      {record.receiptDelivery?.reason && <p style={{ color: '#b45309', fontSize: 13 }}>{record.receiptDelivery.reason}</p>}
-      <div className="sa-action-row">
+        <SaFact label="From wallet">{money(record.walletMinor, record.currency)}</SaFact>
+        <SaFact label="Paid online">{money(record.gatewayMinor, record.currency)}</SaFact>
+        <SaFact label="Counted as software collection">{record.collected ? 'Yes' : 'No'}</SaFact>
+        <SaFact label="Payment method">{providerLabel(record.provider)}</SaFact>
+        <SaFact label="Receipt sent">{statusLabel(record.receiptDelivery?.status || record.delivery?.status || 'not attempted')}</SaFact>
+        {record.receiptDelivery?.reason ? <SaFact label="Delivery note">{record.receiptDelivery.reason}</SaFact> : null}
+      </SaRecordSection>
+      <SaRecordSection title="Owner">
+        <SaFact label="Name">{record.ownerName || '—'}</SaFact>
+        <SaFact label="Email">{record.ownerEmail || '—'}</SaFact>
+        <SaFact label="Phone">{record.ownerPhone || '—'}</SaFact>
+      </SaRecordSection>
+      <SaMoreInfo>
+        <SaFact label="Invoice">{record.invoiceId || '—'}</SaFact>
+        {record.tenantId ? <SaFact label="Library id">{record.tenantId}</SaFact> : null}
+        <SaFact label="Provider reference">{providerRef || '—'}</SaFact>
+      </SaMoreInfo>
+      <SaHelper>
+        {record.status === 'paid'
+          ? `${record.collectedNote || 'This paid invoice is collected money.'} Wallet ledger entries are not copied here.`
+          : 'Resend is available only for paid receipts. Open, pending, failed, and expired invoices are not collected money and do not get a paid receipt.'}
+      </SaHelper>
+      <SaRecordActions>
         {record.status === 'paid' && (
           <>
             <button type="button" className="btn btn-secondary" onClick={() => api.adminSoftwareReceipt(record.invoiceId, 'pdf').catch(e => toast.error(e.message))}>Download receipt</button>
             <button type="button" id="sa-billing-resend" className="btn btn-secondary" disabled={busy} onClick={resend}>Resend receipt</button>
           </>
         )}
-        {onOpenCollections && <button type="button" className="btn btn-ghost" onClick={() => onOpenCollections(record.invoiceId)}>Open Collection Details</button>}
-        {onOpenLibrary && record.tenantId && <button type="button" className="btn btn-ghost" onClick={() => onOpenLibrary(record.tenantId)}>Library details</button>}
-      </div>
-      {record.status !== 'paid' && <p style={{ fontSize: 13, margin: 0 }}>Resend is available only for paid receipts. Open, pending, failed, and expired invoices are not collected money and do not get a paid receipt.</p>}
-      <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}>Wallet ledger entries are not copied here. {record.walletLedger?.note}</p>
+        {onOpenCollections && <button type="button" className="btn btn-secondary" onClick={() => onOpenCollections(record.invoiceId)}>Open Collection Details</button>}
+        {onOpenLibrary && record.tenantId && <button type="button" className="btn btn-secondary" onClick={() => onOpenLibrary(record.tenantId)}>Library details</button>}
+      </SaRecordActions>
     </SaPage>
   );
 }

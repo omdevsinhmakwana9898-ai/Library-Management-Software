@@ -20,9 +20,14 @@ test('payments landing links to dedicated super admin pages', () => {
   assert.match(providers, /id="sa-provider-paypal"/);
   assert.match(policy, /id="sa-billing-policy"/);
   assert.match(history, /id="sa-billing-history"/);
-  assert.match(history, /sa-billing-wallet-topups/);
-  assert.match(history, /sa-billing-paid-receipts/);
-  assert.match(history, /sa-billing-other-invoices/);
+  assert.match(history, /id=\{BUCKETS\[id\]\.id\}/);
+  assert.match(history, /id: 'sa-billing-wallet-topups'/);
+  assert.match(history, /id: 'sa-billing-paid-receipts'/);
+  assert.match(history, /id: 'sa-billing-other-invoices'/);
+  assert.match(history, /SaRecordHero/);
+  assert.match(history, /Paid online/);
+  assert.match(offers, /SaRecordHero/);
+  assert.match(offers, /SaRecordTimeline/);
   assert.match(history, /id="sa-billing-history-list"/);
   assert.match(history, /id="sa-billing-record"/);
   assert.doesNotMatch(history, /requires_recovery/);

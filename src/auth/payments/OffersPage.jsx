@@ -2,7 +2,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
 import { FiltersMenu } from '../FiltersMenu';
-import { SaEmpty, SaFact, SaFactList, SaList, SaListRow, SaPage, SaPageHeader, SaStatusBadge } from '../saPage';
+import {
+  SaEmpty, SaFact, SaHelper, SaList, SaListRow, SaMoreInfo, SaPage, SaPageHeader,
+  SaRecordActions, SaRecordHero, SaRecordSection, SaRecordTimeline, SaStatusBadge,
+} from '../saPage';
 
 const emptyForm = { name: '', code: '', discountType: 'percentage', discountValue: 10, perTenantLimit: 1, usageLimit: '', planIds: '', startsAt: '', endsAt: '', stackable: false };
 const emptyQuery = { q: '', status: '' };
@@ -119,31 +122,45 @@ export function OffersPage({ onOpen }) {
 
   if (screen === 'detail' && editing) {
     const o = editing;
+    const offerWhen = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' }) : null);
+    const offerDates = [
+      o.createdAt ? { label: 'Created', at: offerWhen(o.createdAt) } : null,
+      o.startsAt ? { label: 'Starts', at: offerWhen(o.startsAt) } : null,
+      o.endsAt ? { label: 'Ends', at: offerWhen(o.endsAt) } : null,
+    ].filter(Boolean);
     return (
       <SaPage id="sa-offers">
         <SaPageHeader
           onBack={() => setScreen('list')}
           backLabel="Offers"
-          title={o.code || 'Offer'}
-          subtitle={o.name || 'Offer details'}
-          actions={<button type="button" className="btn btn-primary" onClick={() => startEdit(o)}>Edit</button>}
+          title={o.name || o.code || 'Offer'}
         />
-        <div className="sa-action-row">
-          <SaStatusBadge status={offerBadge(o)}>{statusOf(o)}</SaStatusBadge>
-        </div>
-        <SaFactList>
+        <SaRecordHero
+          name={o.name || o.code || 'Offer'}
+          amount={discount(o)}
+          status={offerBadge(o)}
+          badge={<SaStatusBadge status={offerBadge(o)}>{statusOf(o)}</SaStatusBadge>}
+        />
+        <SaRecordTimeline steps={offerDates} />
+        <SaRecordSection title="Offer">
+          <SaFact label="Code">{o.code || '—'}</SaFact>
           <SaFact label="Discount">{discount(o)}</SaFact>
           <SaFact label="Used">{o.usedCount || 0}{o.usageLimit ? ` / ${o.usageLimit}` : ''}</SaFact>
+          <SaFact label="Per library">{o.perTenantLimit == null || o.perTenantLimit === '' ? 'No limit' : o.perTenantLimit}</SaFact>
           <SaFact label="Stacking">{o.stackable ? 'Allowed' : 'One offer'}</SaFact>
           <SaFact label="Plans">{(o.planIds || []).length ? o.planIds.join(', ') : 'All plans'}</SaFact>
-          <SaFact label="Starts">{o.startsAt ? new Date(o.startsAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'No start date'}</SaFact>
-          <SaFact label="Ends">{o.endsAt ? new Date(o.endsAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'No end date'}</SaFact>
-        </SaFactList>
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>Editing an offer does not rewrite discounts already applied to invoices or redemptions.</p>
-        <div className="sa-action-row">
+          <SaFact label="Starts">{o.startsAt ? offerWhen(o.startsAt) : 'No start date'}</SaFact>
+          <SaFact label="Ends">{o.endsAt ? offerWhen(o.endsAt) : 'No end date'}</SaFact>
+        </SaRecordSection>
+        <SaMoreInfo>
+          <SaFact label="Offer id">{o.offerId || '—'}</SaFact>
+        </SaMoreInfo>
+        <SaHelper>Editing an offer does not rewrite discounts already applied to invoices or redemptions.</SaHelper>
+        <SaRecordActions>
+          <button type="button" className="btn btn-primary" onClick={() => startEdit(o)}>Edit</button>
           <button type="button" className="btn btn-secondary" onClick={() => patch(o, { active: o.active === false })}>{o.active === false ? 'Enable' : 'Disable'}</button>
-          <button type="button" className="btn btn-ghost" onClick={() => { if (!o.archived && !window.confirm('Archive this offer? Already-applied discounts stay as they are.')) return; patch(o, { archived: !o.archived }); }}>{o.archived ? 'Unarchive' : 'Archive'}</button>
-        </div>
+          <button type="button" className="btn btn-secondary" onClick={() => { if (!o.archived && !window.confirm('Archive this offer? Already-applied discounts stay as they are.')) return; patch(o, { archived: !o.archived }); }}>{o.archived ? 'Unarchive' : 'Archive'}</button>
+        </SaRecordActions>
       </SaPage>
     );
   }
