@@ -22,6 +22,13 @@ test('business dashboard shows the collection card and charts and moves the libr
   assert.ok(!dash.slice(businessAt, insightsAt).includes('sa-library-directory'));
   assert.ok(!dash.slice(businessAt, insightsAt).includes('LibraryDirectory'));
   assert.match(dash, /New library/);
+  const newLibraryAt = dash.indexOf('id="sa-new-library"');
+  const totalsAt = dash.indexOf('id="sa-totals"');
+  assert.ok(newLibraryAt !== -1 && totalsAt !== -1);
+  assert.ok(newLibraryAt > businessAt && newLibraryAt < totalsAt);
+  const businessSlice = dash.slice(businessAt, insightsAt);
+  assert.match(businessSlice, /id="sa-new-library"/);
+  assert.equal((businessSlice.match(/New library/g) || []).length, 1);
   assert.match(dash, /LibraryDirectory/);
   assert.match(dash, /PlatformInsightsOverview/);
 });

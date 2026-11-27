@@ -273,6 +273,14 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
 
         {view === 'business' && summary && (
           <div id="sa-business-dashboard" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <header className="sa-page-header">
+              <div className="sa-page-header-main">
+                <h2 className="sa-page-title">Business dashboard</h2>
+              </div>
+              <div className="sa-page-header-actions">
+                <button type="button" id="sa-new-library" className="btn btn-primary" onClick={() => setCreateOpen(true)}><Plus size={14} /> New library</button>
+              </div>
+            </header>
             <div id="sa-totals" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
               <Stat tone="blue" label="Customer libraries" value={summary.libraries.total} sub={`${summary.libraries.active} active • ${summary.libraries.disabled} disabled`} />
               <Stat tone="green" label="New this month" value={summary.libraries.newThisMonth} />
@@ -308,9 +316,6 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
                 </div>
               </div>
             )}
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}><Plus size={14} /> New library</button>
-            </div>
           </div>
         )}
 
