@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { SlidersHorizontal, X } from 'lucide-react';
 import { useBackClose } from '../utils/useBackClose';
 
 /**
  * Filters button, dismissible chips, and a vertical scrollable drawer.
+ * The drawer is portaled to document.body so parent cards cannot clip it.
  * Pass stable ids, e.g. buttonId="sa-collection-filters-button".
  */
 export function FiltersMenu({
@@ -71,7 +73,7 @@ export function FiltersMenu({
           </span>
         ))}
       </div>
-      {open && (
+      {open && createPortal(
         <>
           <div className="sa-filters-backdrop" onClick={close} role="presentation" />
           <form id={menuId} className="sa-filters-menu" role="dialog" aria-modal="true" aria-label="Filters" onSubmit={apply}>
@@ -85,7 +87,8 @@ export function FiltersMenu({
               <button className="btn btn-secondary btn-sm" type="button" onClick={reset}>Reset</button>
             </div>
           </form>
-        </>
+        </>,
+        document.body,
       )}
     </div>
   );
