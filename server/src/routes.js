@@ -42,6 +42,7 @@ import { createPublicEnquiryRouter, createTenantEnquiryRouter } from './enquiry.
 import { createPublicDemoRequestRouter, createDemoRequestAdminRouter } from './demoRequests.js';
 import { createPlanAdminRouter, createPublicPlanRouter, SoftwarePlan, checkBranchLimit, checkStaffLimit, checkDeskLimit, countCurrentDesks, countDesksInList } from './plans.js';
 import { createPaymentsAdminRouter } from './paymentsAdmin.js';
+import { createWalletAdminRouter } from './walletAdmin.js';
 import { createSystemWhatsappRouter } from './systemWhatsapp.js';
 import { createPlatformMessagingRouter } from './platformMessaging.js';
 import { notifyPasswordChanged } from './passwordChangedNotice.js';
@@ -336,6 +337,7 @@ admin.use(createPartnerAdminRouter());
 admin.use(createSupportAdminRouter());
 admin.use(createPlanAdminRouter());
 admin.use(createPaymentsAdminRouter()); // Issue #19
+admin.use(createWalletAdminRouter()); // Phase 2 §12 library wallets
 admin.use(createSystemWhatsappRouter()); // system WhatsApp sender (libos-system)
 admin.use(createPlatformMessagingRouter()); // Gmail sender + test email / test WhatsApp
 admin.use(createAssistedResetRouter()); // Super Admin step-up password reset

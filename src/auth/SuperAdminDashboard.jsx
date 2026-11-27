@@ -16,6 +16,7 @@ import { SupportDesk } from './SupportDesk';
 import { SoftwarePlansCatalog } from './SoftwarePlansCatalog';
 import { LibraryPlans } from './LibraryPlans';
 import { PaymentsAdmin } from './PaymentsAdmin';
+import { WalletsAdmin } from './WalletsAdmin';
 import { MessagingAdmin } from './MessagingAdmin';
 import { DemoRequestsAdmin } from './DemoRequestsAdmin';
 import { SaModal } from './SaModal';
@@ -214,6 +215,7 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
           <button role="tab" id="sa-tab-software-plans" aria-selected={view === 'plans'} className={`btn btn-sm ${view === 'plans' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'plans'; setView('plans'); setPlanDetailId(null); }}>Software plans</button>
           <button role="tab" id="sa-tab-library-plans" aria-selected={view === 'library-plans'} className={`btn btn-sm ${view === 'library-plans' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'library-plans'; setView('library-plans'); }}>Library plans</button>
           <button role="tab" id="sa-tab-payments" aria-selected={view === 'payments'} className={`btn btn-sm ${view === 'payments' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'payments'; setView('payments'); setPaymentsKey(k => k + 1); }}>Payments</button>
+          <button role="tab" id="sa-tab-wallets" aria-selected={view === 'wallets'} className={`btn btn-sm ${view === 'wallets' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'wallets'; setView('wallets'); }}>Library wallets</button>
           <button role="tab" id="sa-tab-messaging" aria-selected={view === 'messaging'} className={`btn btn-sm ${view === 'messaging' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'messaging'; setView('messaging'); }}>Messaging</button>
           <button role="tab" aria-selected={view === 'support'} className={`btn btn-sm ${view === 'support' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'support'; setView('support'); }}>Support tickets{summary?.kpis?.support?.value ? ` (${summary.kpis.support.value})` : ''}</button>
           <button role="tab" aria-selected={view === 'demos'} className={`btn btn-sm ${view === 'demos' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'demos'; setView('demos'); }}>Demo requests</button>
@@ -243,6 +245,7 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
             onChanged={load}
           />
         )}
+        {view === 'wallets' && <WalletsAdmin />}
         {view === 'payments' && (
           <PaymentsAdmin
             key={paymentsKey}
