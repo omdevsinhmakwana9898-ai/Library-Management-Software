@@ -3,20 +3,7 @@ import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../utils/api';
 import { SaModal } from './SaModal';
-import { FiltersMenu } from './FiltersMenu';
-
-const PRESETS = [
-  ['last_7_days', 'Last 7 days'],
-  ['this_month', 'This month'],
-  ['last_month', 'Last month'],
-  ['last_2_months', 'Last 2 months'],
-  ['last_3_months', 'Last 3 months'],
-  ['last_6_months', 'Last 6 months'],
-  ['last_1_year', 'Last 1 year'],
-  ['last_3_years', 'Last 3 years'],
-  ['all_time', 'All time'],
-  ['custom', 'Custom'],
-];
+import { DatePeriodSelect, FiltersMenu, datePeriodLabel } from './FiltersMenu';
 
 export const inrMinor = (minor) => `₹${(Number(minor || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (d) => (d ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' }) : '—');
@@ -48,10 +35,7 @@ const Money = ({ label, value, sub, tone }) => (
 );
 
 const KIND_LABEL = { subscription: 'Subscription', upgrade: 'Upgrade', topup: 'Wallet top-up' };
-const presetLabel = (q) => {
-  if (q.preset === 'custom') return `Custom${q.from || q.to ? `: ${q.from || '…'} – ${q.to || '…'}` : ''}`;
-  return PRESETS.find(([id]) => id === q.preset)?.[1] || q.preset;
-};
+const presetLabel = (q) => datePeriodLabel(q.preset, q);
 const emptyQuery = { preset: 'this_month', q: '', kind: '', status: '', provider: '', from: '', to: '' };
 
 const Field = ({ label, value }) => (
@@ -109,17 +93,15 @@ export function CollectionDetails({ query, data, loading, onQuery, onBack }) {
         onClose={() => setDraft(query)}
         applyDisabled={loading}
       >
-        <div role="group" aria-label="Date range" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {PRESETS.map(([id, label]) => (
-            <button key={id} type="button" className={`btn btn-sm ${draft.preset === id ? 'btn-primary' : 'btn-secondary'}`} style={{ justifyContent: 'flex-start', width: '100%' }} aria-pressed={draft.preset === id} onClick={() => setDraft(d => ({ ...d, preset: id }))}>{label}</button>
-          ))}
-        </div>
-        {draft.preset === 'custom' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <label className="form-label" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>From<input className="form-input" type="date" value={draft.from || ''} onChange={set('from')} required /></label>
-            <label className="form-label" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>To<input className="form-input" type="date" value={draft.to || ''} onChange={set('to')} required /></label>
-          </div>
-        )}
+        <DatePeriodSelect
+          id="sa-collection-filters-period"
+          value={draft.preset || 'this_month'}
+          onChange={(preset) => setDraft(d => ({ ...d, preset }))}
+          from={draft.from}
+          to={draft.to}
+          onFromChange={(from) => setDraft(d => ({ ...d, from }))}
+          onToChange={(to) => setDraft(d => ({ ...d, to }))}
+        />
         <label className="form-label" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>Search
           <input className="form-input" value={draft.q || ''} onChange={set('q')} placeholder="Library, owner, transaction, receipt" />
         </label>

@@ -2,6 +2,46 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { SlidersHorizontal, X } from 'lucide-react';
 import { useBackClose } from '../utils/useBackClose';
+import { DATE_PERIOD_PRESETS } from './datePeriod';
+
+export { DATE_PERIOD_PRESETS, datePeriodLabel, resolveDatePeriod } from './datePeriod';
+
+const fieldLabel = { margin: 0, display: 'flex', flexDirection: 'column', gap: 4 };
+
+/**
+ * One Period dropdown. From and To appear only when Custom is selected.
+ */
+export function DatePeriodSelect({
+  id = 'sa-filters-period',
+  value,
+  onChange,
+  from = '',
+  to = '',
+  onFromChange,
+  onToChange,
+}) {
+  return (
+    <>
+      <label className="form-label" htmlFor={id} style={fieldLabel}>Period
+        <select id={id} className="form-select" value={value || ''} onChange={(e) => onChange?.(e.target.value)}>
+          {DATE_PERIOD_PRESETS.map(([presetId, label]) => (
+            <option key={presetId} value={presetId}>{label}</option>
+          ))}
+        </select>
+      </label>
+      {value === 'custom' && (
+        <>
+          <label className="form-label" htmlFor={`${id}-from`} style={fieldLabel}>From
+            <input id={`${id}-from`} className="form-input" type="date" value={from || ''} onChange={(e) => onFromChange?.(e.target.value)} required />
+          </label>
+          <label className="form-label" htmlFor={`${id}-to`} style={fieldLabel}>To
+            <input id={`${id}-to`} className="form-input" type="date" value={to || ''} onChange={(e) => onToChange?.(e.target.value)} required />
+          </label>
+        </>
+      )}
+    </>
+  );
+}
 
 /**
  * Filters button, dismissible chips, and a vertical scrollable drawer.
