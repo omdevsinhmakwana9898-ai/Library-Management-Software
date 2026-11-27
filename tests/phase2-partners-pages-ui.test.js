@@ -1,0 +1,42 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+
+const dash = readFileSync(new URL('../src/auth/SuperAdminDashboard.jsx', import.meta.url), 'utf8');
+const landing = readFileSync(new URL('../src/auth/PartnersAdmin.jsx', import.meta.url), 'utf8');
+const directory = readFileSync(new URL('../src/auth/partners/DirectoryPage.jsx', import.meta.url), 'utf8');
+const detail = readFileSync(new URL('../src/auth/partners/PartnerDetailPage.jsx', import.meta.url), 'utf8');
+const assignments = readFileSync(new URL('../src/auth/partners/AssignmentsPage.jsx', import.meta.url), 'utf8');
+const commissions = readFileSync(new URL('../src/auth/partners/CommissionsPage.jsx', import.meta.url), 'utf8');
+const record = readFileSync(new URL('../src/auth/partners/CommissionRecordPage.jsx', import.meta.url), 'utf8');
+const notes = readFileSync(new URL('../src/auth/partners/PayoutNotesPage.jsx', import.meta.url), 'utf8');
+const portal = readFileSync(new URL('../src/auth/PartnerPortal.jsx', import.meta.url), 'utf8');
+
+test('partners landing links to the dedicated super admin pages', () => {
+  assert.match(dash, /id="sa-tab-partners"/);
+  assert.match(dash, /PartnersAdmin/);
+  assert.match(landing, /id="sa-partners-landing"/);
+  assert.match(directory, /id="sa-partners-directory"/);
+  assert.match(detail, /id="sa-partner-detail"/);
+  assert.match(assignments, /id="sa-partner-assignments"/);
+  assert.match(commissions, /id="sa-commissions"/);
+  assert.match(record, /id="sa-commission-record"/);
+  assert.match(notes, /id="sa-payout-records"/);
+  assert.match(directory, /sa-partners-filters-button/);
+  assert.match(directory, /sa-partners-filters-menu/);
+  assert.match(directory, /FiltersMenu/);
+  assert.match(commissions, /sa-commissions-filters-button/);
+  assert.match(commissions, /sa-commissions-filters-menu/);
+  assert.match(commissions, /FiltersMenu/);
+  assert.match(landing, /open owner question/i);
+  assert.match(assignments, /never earn a new-sale commission/);
+  assert.match(assignments, /original seller cannot be changed once set/i);
+  assert.match(assignments, /Only an Active partner/);
+  assert.match(record, /not a bank transfer/);
+  assert.match(record, /not a payment executed/);
+  assert.match(notes, /bank transfer/);
+  assert.match(notes, /payment executed/);
+  assert.match(portal, /PartnerPortal|assigned clients|Access Library/);
+  assert.doesNotMatch(notes, /razorpay|bank account|IFSC/i);
+  assert.doesNotMatch(record, /razorpay|IFSC/i);
+});
