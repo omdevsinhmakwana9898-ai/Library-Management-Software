@@ -292,11 +292,13 @@ select.input-field { text-overflow: ellipsis; white-space: nowrap; overflow: hid
    html/body/#root used overflow-x:hidden, which turns each of them into a scroll box, and the
    content scrolled inside a nested 100dvh overflow:hidden shell. iOS Safari sends the swipe to
    the outer boxes, which have nothing to scroll, so the screen felt locked. overflow-x:clip
-   still blocks sideways scrolling but is not a scroll box. The bottom bar stays position:fixed. */
+   still blocks sideways scrolling but is not a scroll box. The bottom bar stays position:fixed.
+   overscroll-behavior-y stays auto on the document so a pull at the top can use the browser's
+   native refresh. The More drawer keeps overscroll-behavior: contain. */
 @media (max-width: 767px) {
   html, body, #root { overflow-x: hidden; overflow-y: visible; }
   @supports (overflow: clip) { html, body, #root { overflow-x: clip; } }
-  html, body { height: auto; overscroll-behavior-y: none; }
+  html, body { height: auto; overscroll-behavior-y: auto; }
   .lib-workspace, .app-container { height: auto !important; min-height: 100dvh; overflow: visible !important; }
   .lib-workspace > div { min-height: 0; }
   .page-body-wrapper, .page-scroller { overflow: visible !important; flex: 1 0 auto !important; }
