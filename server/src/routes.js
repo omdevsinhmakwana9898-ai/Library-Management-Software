@@ -34,7 +34,7 @@ import { createSignupRouter, createGoogleSignupPending, signupEnabled } from './
 import { createProfileRouter } from './profile.js';
 import { createSoftwarePlanRouter, createSoftwarePlanAdminRouter } from './softwarePlan.js';
 import { throttleHit, clearThrottle } from './throttle.js';
-import { normalizeEmail, normalizeMobile, EMAIL_RE } from './identity.js';
+import { normalizeEmail, normalizeMobile, EMAIL_RE, maskEmail } from './identity.js';
 import { createSubscriptionRouter } from './subscription.js';
 import { requireActiveSubscription, requireFeature, refreshSubscriptionStatus, accessFor, toClientAccess } from './subscriptionAccess.js';
 import { createPublicEnquiryRouter, createTenantEnquiryRouter } from './enquiry.js';
@@ -42,6 +42,8 @@ import { createPublicDemoRequestRouter, createDemoRequestAdminRouter } from './d
 import { createPlanAdminRouter, createPublicPlanRouter, SoftwarePlan, checkBranchLimit, checkStaffLimit, checkDeskLimit, countCurrentDesks, countDesksInList } from './plans.js';
 import { createPaymentsAdminRouter } from './paymentsAdmin.js';
 import { createSystemWhatsappRouter } from './systemWhatsapp.js';
+import { createPlatformMessagingRouter } from './platformMessaging.js';
+import { notifyPasswordChanged } from './passwordChangedNotice.js';
 import { createAssistedResetRouter } from './assistedReset.js';
 import { createBillingAdminRouter } from './billingConfig.js';
 import { refreshPaymentProvider } from './paymentConfig.js';
@@ -202,7 +204,8 @@ router.get('/auth/google/callback', wrap(async (req, res) => {
         if (!lib || lib.status !== 'Active') return fail('library_disabled');
       }
       const resetToken = await issueLinkedGooglePasswordReset(linked, req.ip);
-      return res.redirect(302, `${frontendUrl}/#google_reset=${encodeURIComponent(resetToken)}`);
+      const sent = linked.email ? `&sent=${encodeURIComponent(maskEmail(linked.email))}` : '';
+      return res.redirect(302, `${frontendUrl}/#google_reset=${encodeURIComponent(resetToken)}${sent}`);
     }
 
     let user = await User.findOne({ email: identity.email });
@@ -317,6 +320,7 @@ router.post('/auth/change-password', wrap(async (req, res) => {
   user.authProviders = [...new Set([...(user.authProviders || []), 'password'])];
   await user.save();
   await audit(req, 'password.changed', { tenantId: user.tenantId || null });
+  await notifyPasswordChanged(user, { via: 'change', ip: req.ip });
   res.json({ ok: true });
 }));
 
@@ -331,6 +335,7 @@ admin.use(createSupportAdminRouter());
 admin.use(createPlanAdminRouter());
 admin.use(createPaymentsAdminRouter()); // Issue #19
 admin.use(createSystemWhatsappRouter()); // system WhatsApp sender (libos-system)
+admin.use(createPlatformMessagingRouter()); // Gmail sender + test email / test WhatsApp
 admin.use(createAssistedResetRouter()); // Super Admin step-up password reset
 admin.use(createBillingAdminRouter()); // Issue #19 explicit tax/currency policy
 admin.use(createSoftwarePlanAdminRouter()); // Issue #19 offers + referral campaigns

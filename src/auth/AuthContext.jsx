@@ -46,6 +46,7 @@ export function AuthProvider({ children }) {
   const [oauthError, setOauthError] = useState('');
   const [googleSignupPending, setGoogleSignupPending] = useState('');
   const [googleResetToken, setGoogleResetToken] = useState(''); // Issue #15
+  const [googleResetHint, setGoogleResetHint] = useState(''); // masked destination for the linked Google reset step
   const [status, setStatus] = useState(() => {
     const hasHashToken = typeof window !== 'undefined' && window.location.hash.includes('google_token=');
     return getToken() || hasHashToken ? 'loading' : 'anonymous';
@@ -91,6 +92,7 @@ export function AuthProvider({ children }) {
       const code = params.get('google_error');
       const signupTok = params.get('google_signup');
       const resetTok = params.get('google_reset');
+      const resetHint = params.get('sent');
       if (token) {
         let tab = false;
         try { tab = sessionStorage.getItem('library_invite_tab') === '1' || Boolean(readInviteToken()); if (tab) sessionStorage.removeItem('library_invite_tab'); } catch { /* private mode */ }
@@ -99,6 +101,7 @@ export function AuthProvider({ children }) {
       if (code) setOauthError(code);
       if (signupTok) setGoogleSignupPending(signupTok);
       if (resetTok) setGoogleResetToken(resetTok);
+      if (resetHint) setGoogleResetHint(resetHint);
       if (token || code || signupTok || resetTok) window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
 
@@ -114,7 +117,7 @@ export function AuthProvider({ children }) {
   const loginWithGoogle = async (credential) => completeLogin(await api.loginWithGoogle(credential));
 
   return (
-    <AuthContext.Provider value={{ ...session, status, oauthError, googleSignupPending, googleResetToken, clearGoogleSignupPending: () => setGoogleSignupPending(''), clearGoogleResetToken: () => setGoogleResetToken(''), completeLogin, loginWithPassword, loginWithGoogle, logout, refreshSession }}>
+    <AuthContext.Provider value={{ ...session, status, oauthError, googleSignupPending, googleResetToken, googleResetHint, clearGoogleSignupPending: () => setGoogleSignupPending(''), clearGoogleResetToken: () => { setGoogleResetToken(''); setGoogleResetHint(''); }, completeLogin, loginWithPassword, loginWithGoogle, logout, refreshSession }}>
       {children}
     </AuthContext.Provider>
   );

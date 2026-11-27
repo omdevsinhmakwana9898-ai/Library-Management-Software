@@ -12,7 +12,8 @@ import { sanitizeStaffPermissions } from '../../src/utils/staffPermissions.js';
 import { hashPassword, validatePassword } from './services.js';
 import { sendMail } from './mailer.js';
 import { sendMobileMessage, smsConfigured } from './messaging.js';
-import { normalizeMobile, isMobile } from './identity.js';
+import { normalizeMobile, isMobile, maskEmail } from './identity.js';
+import { notifyPasswordChanged } from './passwordChangedNotice.js';
 import { normalizePhone } from './evolution.js';
 import { encryptSecret, decryptSecret } from './cryptoSecrets.js';
 import { sendSystemWhatsapp, systemWhatsappConfigured, systemWhatsappReady } from './systemWhatsapp.js';
@@ -334,7 +335,7 @@ export function createPublicAccountRouter({ issueSession }) {
     const mobile = normalizeMobile(req.body?.mobile);
     const generic = { ok: true, message: 'If this mobile number is registered, a reset code has been sent.' };
     if (!isMobile(mobile)) return res.status(400).json({ error: 'A valid mobile number is required' });
-    if (!smsConfigured()) return res.status(503).json({ error: 'Mobile verification is not configured. Contact support.', code: 'mobile_otp_not_configured' });
+    if (!(smsConfigured() || await systemWhatsappReady())) return res.status(503).json({ error: 'Mobile verification is not configured. Contact support.', code: 'mobile_otp_not_configured' });
     if (rateLimited(`fmp:${req.ip}`, 10, 15 * 60e3)) return res.status(429).json({ error: 'Too many requests. Try again later.' });
     if (rateLimited(`fmp-send:${mobile}`, 1, 30e3)) return res.status(429).json({ error: 'Please wait 30 seconds before requesting another code.' });
     if (await throttleHit(`forgot-mobile:${mobile}`, 5, 15 * 60e3)) return res.status(429).json({ error: 'Too many requests. Try again later.' });
@@ -373,7 +374,8 @@ export function createPublicAccountRouter({ issueSession }) {
     user.passwordChangedAt = new Date();
     await user.save();
     await audit({ user: { id: String(user._id), email: user.email, role: user.role }, ip: req.ip }, 'password.reset_completed', { tenantId: user.tenantId || null, via: 'mobile' });
-    res.json({ ok: true });
+    await notifyPasswordChanged(user, { via: 'mobile', ip: req.ip });
+    res.json({ ok: true, channel: 'whatsapp', maskedDestination: `••••${String(user.mobile || mobile).slice(-4)}` });
   }));
 
   // Linked Google proves the account, then the user sets a My Library OS password only.
@@ -395,7 +397,13 @@ export function createPublicAccountRouter({ issueSession }) {
     user.passwordChangedAt = new Date();
     await user.save();
     await audit({ user: { id: String(user._id), email: user.email, role: user.role }, ip: req.ip }, 'password.reset_completed', { tenantId: user.tenantId || null, via: 'google' });
-    res.json({ ok: true, message: 'Your My Library OS password was updated. Your Google password was not changed.' });
+    await notifyPasswordChanged(user, { via: 'google', ip: req.ip });
+    res.json({
+      ok: true,
+      message: 'Your My Library OS password was updated. Your Google password was not changed.',
+      channel: 'email',
+      maskedDestination: user.email ? maskEmail(user.email) : null,
+    });
   }));
 
   r.post('/auth/reset-password', wrap(async (req, res) => {
@@ -419,7 +427,8 @@ export function createPublicAccountRouter({ issueSession }) {
     user.passwordChangedAt = new Date();
     await user.save();
     await audit({ user: { id: String(user._id), email: user.email, role: user.role }, ip: req.ip }, 'password.reset_completed', { tenantId: user.tenantId || null });
-    res.json({ ok: true });
+    await notifyPasswordChanged(user, { via: 'email', ip: req.ip });
+    res.json({ ok: true, channel: 'email', maskedDestination: maskEmail(user.email) });
   }));
   return r;
 }
