@@ -14,6 +14,7 @@ import { walletSnapshot, walletHistory, holdWallet, releaseWalletHold } from './
 import { audit } from './audit.js';
 import { requireRole } from './auth.js';
 import { assertModule } from './staffAccess.js';
+import { searchBillingHistory, getBillingRecord } from './billingHistory.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const rid = (p) => `${p}_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
@@ -566,6 +567,14 @@ export function createSoftwarePlanAdminRouter() {
     res.set('Content-Disposition', `attachment; filename="receipt-${inv.receiptNo}.txt"`);
     res.send(body);
   }));
+  r.get('/software-plan/billing-history', wrap(async (req, res) => {
+    res.json(await searchBillingHistory(req.query || {}));
+  }));
+  r.get('/software-plan/billing-history/:invoiceId', wrap(async (req, res) => {
+    const row = await getBillingRecord(req.params.invoiceId);
+    if (!row) return res.status(404).json({ error: 'Invoice not found' });
+    res.json(row);
+  }));
   r.post('/software-plan/invoices/:invoiceId/receipt/deliver', wrap(async (req, res) => {
     const inv = await SoftwareInvoice.findOne({ invoiceId: req.params.invoiceId, status: 'paid' }).lean();
     if (!inv) return res.status(404).json({ error: 'Paid invoice not found' });
@@ -574,7 +583,20 @@ export function createSoftwarePlanAdminRouter() {
     await audit(req, 'software_plan.receipt_resent', { tenantId: inv.tenantId, target: inv.invoiceId, detail: { status: result.status, attemptId: result.attemptId, by: 'superadmin' } });
     res.status(result.ok ? 200 : 502).json(result);
   }));
-  r.get('/offers', wrap(async (_req, res) => res.json(await Offer.find().sort({ createdAt: -1 }).lean())));
+  r.get('/offers', wrap(async (req, res) => {
+    const q = String(req.query.q || '').trim();
+    const status = String(req.query.status || '').trim();
+    const filter = {};
+    if (q) {
+      const rx = new RegExp(String(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter.$or = [{ name: rx }, { code: rx }];
+    }
+    if (status === 'available') Object.assign(filter, { active: { $ne: false }, archived: { $ne: true } });
+    else if (status === 'inactive') Object.assign(filter, { active: false, archived: { $ne: true } });
+    else if (status === 'archived') filter.archived = true;
+    else if (status) return res.status(400).json({ error: 'Unknown offer status' });
+    res.json(await Offer.find(filter).sort({ createdAt: -1 }).lean());
+  }));
   r.post('/offers', wrap(async (req, res) => {
     const b = req.body || {};
     if (!b.name || !b.code) return res.status(400).json({ error: 'name and code are required' });
@@ -587,23 +609,91 @@ export function createSoftwarePlanAdminRouter() {
       startsAt: b.startsAt || null, endsAt: b.endsAt || null,
       usageLimit: b.usageLimit ?? null, perTenantLimit: b.perTenantLimit ?? 1,
       planIds: Array.isArray(b.planIds) ? b.planIds : [], minAmountMinor: Math.round(Number(b.minAmountMinor || 0)),
+      stackable: !!b.stackable,
       active: b.active !== false, updatedBy: req.user.email,
     });
     await audit(req, 'offer.created', { detail: { offerId: offer.offerId, code: offer.code } });
     res.status(201).json(offer);
   }));
   r.put('/offers/:offerId', wrap(async (req, res) => {
-    const patch = { ...req.body, updatedBy: req.user.email };
-    delete patch._id; delete patch.offerId; delete patch.usedCount;
+    // Offer edits change the catalog only. They do not update OfferRedemption discountMinor or status.
+    const existing = await Offer.findOne({ offerId: req.params.offerId });
+    if (!existing) return res.status(404).json({ error: 'Offer not found' });
+    const src = req.body || {};
+    const patch = { updatedBy: req.user.email };
+    for (const k of ['name', 'discountType', 'discountValue', 'usageLimit', 'perTenantLimit', 'planIds', 'minAmountMinor', 'stackable', 'active', 'archived']) {
+      if (Object.prototype.hasOwnProperty.call(src, k)) patch[k] = src[k];
+    }
+    if (Object.prototype.hasOwnProperty.call(src, 'code') && src.code != null) patch.code = String(src.code).toUpperCase().trim();
+    if (patch.discountType != null && !['percentage', 'fixed'].includes(patch.discountType)) return res.status(400).json({ error: 'Invalid discount type' });
+    const type = patch.discountType || existing.discountType;
+    if (patch.discountValue != null) {
+      const n = Number(patch.discountValue);
+      if (!Number.isFinite(n) || n < 0 || (type === 'percentage' && n > 100)) return res.status(400).json({ error: 'Invalid discount value' });
+      patch.discountValue = type === 'fixed' ? Math.round(n) : n;
+    }
+    if (Object.prototype.hasOwnProperty.call(src, 'usageLimit')) patch.usageLimit = src.usageLimit == null || src.usageLimit === '' ? null : Number(src.usageLimit);
+    if (Object.prototype.hasOwnProperty.call(src, 'perTenantLimit')) patch.perTenantLimit = src.perTenantLimit == null || src.perTenantLimit === '' ? null : Number(src.perTenantLimit);
+    for (const d of ['startsAt', 'endsAt']) {
+      if (Object.prototype.hasOwnProperty.call(src, d)) patch[d] = src[d] ? new Date(src[d]) : null;
+    }
+    if (patch.planIds != null && !Array.isArray(patch.planIds)) return res.status(400).json({ error: 'planIds must be a list' });
+    if (patch.active != null) patch.active = !!patch.active;
+    if (patch.archived != null) patch.archived = !!patch.archived;
+    if (patch.stackable != null) patch.stackable = !!patch.stackable;
     const offer = await Offer.findOneAndUpdate({ offerId: req.params.offerId }, { $set: patch }, { new: true });
-    if (!offer) return res.status(404).json({ error: 'Offer not found' });
+    await audit(req, 'offer.updated', { detail: { offerId: offer.offerId, fields: Object.keys(patch).filter(k => k !== 'updatedBy') } });
     res.json(offer);
   }));
 
-  r.get('/referral-campaigns', wrap(async (_req, res) => res.json(await ReferralCampaign.find().sort({ createdAt: -1 }).lean())));
+  r.get('/referral-campaigns', wrap(async (req, res) => {
+    const q = String(req.query.q || '').trim();
+    const active = String(req.query.active || '').trim();
+    const filter = {};
+    if (q) filter.name = new RegExp(String(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    if (active === 'true') filter.active = { $ne: false };
+    else if (active === 'false') filter.active = false;
+    else if (active) return res.status(400).json({ error: 'Unknown campaign filter' });
+    res.json(await ReferralCampaign.find(filter).sort({ createdAt: -1 }).lean());
+  }));
+  r.get('/referrals', wrap(async (req, res) => {
+    const q = String(req.query.q || '').trim();
+    const status = String(req.query.status || '').trim();
+    const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
+    const limit = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit) || 25)));
+    const filter = {};
+    if (status) {
+      if (!['pending', 'qualified', 'credited', 'rejected'].includes(status)) return res.status(400).json({ error: 'Unknown referral status' });
+      filter.status = status;
+    }
+    if (q) {
+      const rx = new RegExp(String(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      const [libs, campaigns] = await Promise.all([
+        Library.find({ $or: [{ name: rx }, { libraryId: rx }, { contactEmail: rx }, { referralCode: rx }] }).select('libraryId').lean(),
+        ReferralCampaign.find({ name: rx }).select('campaignId').lean(),
+      ]);
+      const ids = libs.map(l => l.libraryId);
+      filter.$or = [
+        { code: rx }, { referralId: rx }, { invoiceId: rx }, { reason: rx },
+        { referrerTenantId: { $in: ids } }, { referredTenantId: { $in: ids } },
+        { campaignId: { $in: campaigns.map(c => c.campaignId) } },
+      ];
+    }
+    const [total, items] = await Promise.all([
+      Referral.countDocuments(filter),
+      Referral.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    ]);
+    res.json({
+      items, page, limit, total, pages: Math.max(1, Math.ceil(total / limit)),
+      policy: 'Reward eligibility is only after a qualifying first genuine paid subscription. Trials and 100% promos do not qualify unless that campaign already has allowTrials or allow100PercentPromo enabled. This list does not pay out rewards.',
+    });
+  }));
   r.post('/referral-campaigns', wrap(async (req, res) => {
     const b = req.body || {};
     if (!b.name) return res.status(400).json({ error: 'name is required' });
+    if (b.qualifyingEvent && b.qualifyingEvent !== 'first_paid_subscription') {
+      return res.status(400).json({ error: 'Referral qualifying event stays the first genuine paid subscription.' });
+    }
     const c = await ReferralCampaign.create({
       campaignId: rid('rc'), name: String(b.name).slice(0, 100), rewardMinor: Math.max(0, Math.round(Number(b.rewardMinor || 0))),
       rewardBucket: b.rewardBucket === 'cash' ? 'cash' : 'bonus', qualifyingEvent: 'first_paid_subscription',
@@ -615,10 +705,33 @@ export function createSoftwarePlanAdminRouter() {
     res.status(201).json(c);
   }));
   r.put('/referral-campaigns/:campaignId', wrap(async (req, res) => {
-    const patch = { ...req.body, updatedBy: req.user.email };
-    delete patch._id; delete patch.campaignId;
+    // Campaign edits do not rewrite Referral rows already stored.
+    const existing = await ReferralCampaign.findOne({ campaignId: req.params.campaignId });
+    if (!existing) return res.status(404).json({ error: 'Campaign not found' });
+    const src = req.body || {};
+    if (src.qualifyingEvent && src.qualifyingEvent !== 'first_paid_subscription') {
+      return res.status(400).json({ error: 'Referral qualifying event stays the first genuine paid subscription.' });
+    }
+    const patch = { updatedBy: req.user.email };
+    if (src.name != null) patch.name = String(src.name).slice(0, 100);
+    if (src.rewardMinor != null) {
+      const n = Math.round(Number(src.rewardMinor));
+      if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: 'Invalid reward' });
+      patch.rewardMinor = n;
+    }
+    if (src.rewardBucket != null) patch.rewardBucket = src.rewardBucket === 'cash' ? 'cash' : 'bonus';
+    if (Object.prototype.hasOwnProperty.call(src, 'startsAt')) patch.startsAt = src.startsAt ? new Date(src.startsAt) : null;
+    if (Object.prototype.hasOwnProperty.call(src, 'endsAt')) patch.endsAt = src.endsAt ? new Date(src.endsAt) : null;
+    if (src.active != null) patch.active = !!src.active;
+    if (Object.prototype.hasOwnProperty.call(src, 'maxRewards')) patch.maxRewards = src.maxRewards == null || src.maxRewards === '' ? null : Math.round(Number(src.maxRewards));
+    if (src.planIds != null) {
+      if (!Array.isArray(src.planIds)) return res.status(400).json({ error: 'planIds must be a list' });
+      patch.planIds = src.planIds;
+    }
+    if (src.allowTrials != null) patch.allowTrials = !!src.allowTrials;
+    if (src.allow100PercentPromo != null) patch.allow100PercentPromo = !!src.allow100PercentPromo;
     const c = await ReferralCampaign.findOneAndUpdate({ campaignId: req.params.campaignId }, { $set: patch }, { new: true });
-    if (!c) return res.status(404).json({ error: 'Campaign not found' });
+    await audit(req, 'referral.campaign_updated', { detail: { campaignId: c.campaignId, fields: Object.keys(patch).filter(k => k !== 'updatedBy') } });
     res.json(c);
   }));
   return r;

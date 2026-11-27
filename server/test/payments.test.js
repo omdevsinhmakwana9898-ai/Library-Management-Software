@@ -31,6 +31,7 @@ test('Super Admin can save Razorpay config without echoing secrets', async () =>
     token: ctx.tokens.sa,
     body: {
       activeProvider: 'razorpay',
+      confirmActiveProvider: true,
       razorpay: { enabled: true, keyId: 'rzp_test_key', keySecret: 'super-secret-key', webhookSecret: 'whsec_abc', mode: 'test' },
     },
   });

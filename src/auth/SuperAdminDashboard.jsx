@@ -68,6 +68,7 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
   const collectionQueryRef = useRef(collectionQuery);
   const [insightNav, setInsightNav] = useState(null);
   const [planDetailId, setPlanDetailId] = useState(null);
+  const [paymentsKey, setPaymentsKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ name: '', adminEmail: '', adminName: '' });
   const [createOpen, setCreateOpen] = useState(false);
@@ -212,7 +213,7 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
           <button role="tab" aria-selected={view === 'partners'} className={`btn btn-sm ${view === 'partners' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'partners'; setView('partners'); }}>Partners &amp; Commissions</button>
           <button role="tab" id="sa-tab-software-plans" aria-selected={view === 'plans'} className={`btn btn-sm ${view === 'plans' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'plans'; setView('plans'); setPlanDetailId(null); }}>Software plans</button>
           <button role="tab" id="sa-tab-library-plans" aria-selected={view === 'library-plans'} className={`btn btn-sm ${view === 'library-plans' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'library-plans'; setView('library-plans'); }}>Library plans</button>
-          <button role="tab" aria-selected={view === 'payments'} className={`btn btn-sm ${view === 'payments' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'payments'; setView('payments'); }}>Payments</button>
+          <button role="tab" id="sa-tab-payments" aria-selected={view === 'payments'} className={`btn btn-sm ${view === 'payments' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'payments'; setView('payments'); setPaymentsKey(k => k + 1); }}>Payments</button>
           <button role="tab" id="sa-tab-messaging" aria-selected={view === 'messaging'} className={`btn btn-sm ${view === 'messaging' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'messaging'; setView('messaging'); }}>Messaging</button>
           <button role="tab" aria-selected={view === 'support'} className={`btn btn-sm ${view === 'support' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'support'; setView('support'); }}>Support tickets{summary?.kpis?.support?.value ? ` (${summary.kpis.support.value})` : ''}</button>
           <button role="tab" aria-selected={view === 'demos'} className={`btn btn-sm ${view === 'demos' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'demos'; setView('demos'); }}>Demo requests</button>
@@ -242,7 +243,26 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
             onChanged={load}
           />
         )}
-        {view === 'payments' && <PaymentsAdmin />}
+        {view === 'payments' && (
+          <PaymentsAdmin
+            key={paymentsKey}
+            onOpenCollections={(hint) => {
+              const next = { preset: 'all_time', q: hint || '', kind: '', status: '', provider: '', from: '', to: '' };
+              collectionQueryRef.current = next;
+              setCollectionQuery(next);
+              viewRef.current = 'collections';
+              setView('collections');
+              load({ silent: true }).then(result => {
+                if (!result.ok) toast.error(result.error?.message || 'Could not load collection details');
+              });
+            }}
+            onOpenLibrary={(libraryId) => {
+              setInsightNav({ page: 'details', libraryId });
+              viewRef.current = 'insights';
+              setView('insights');
+            }}
+          />
+        )}
         {view === 'messaging' && <MessagingAdmin accountMobile={user?.mobile || ''} />}
         {view === 'partners' && <PartnersAdmin libraries={libraries} onChanged={load} />}
         {view === 'support' && <SupportDesk libraries={libraries} onAccessLibrary={(id) => { const l = libraries.find(x => x.libraryId === id); if (l) onOpenLibrary(l, true); }} />}
