@@ -20,7 +20,13 @@ test('payments landing links to dedicated super admin pages', () => {
   assert.match(providers, /id="sa-provider-paypal"/);
   assert.match(policy, /id="sa-billing-policy"/);
   assert.match(history, /id="sa-billing-history"/);
+  assert.match(history, /sa-billing-wallet-topups/);
+  assert.match(history, /sa-billing-paid-receipts/);
+  assert.match(history, /sa-billing-other-invoices/);
+  assert.match(history, /id="sa-billing-history-list"/);
   assert.match(history, /id="sa-billing-record"/);
+  assert.doesNotMatch(history, /requires_recovery/);
+  assert.doesNotMatch(history, /Paid → paid/);
   assert.match(offers, /id="sa-offers"/);
   assert.match(referrals, /id="sa-referrals"/);
   assert.match(deletion, /id="sa-deletion-requests"/);
@@ -69,6 +75,10 @@ test('billing history resend is paid-only and deletion does not add a one-click 
   assert.match(history, /Open Collection Details|onOpenCollections/);
   assert.match(history, /wallet ledger/i);
   assert.match(offers, /does not rewrite discounts already applied/);
+  assert.doesNotMatch(offers, /SaModal/);
+  assert.doesNotMatch(referrals, /SaModal/);
+  assert.match(offers, /screen === 'editor'/);
+  assert.match(referrals, /screen === 'editor'/);
   assert.match(referrals, /first genuine paid subscription/);
   assert.match(referrals, /does not pay out rewards/);
   assert.match(deletion, /still requires typing the library name/);

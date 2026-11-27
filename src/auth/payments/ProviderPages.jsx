@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
+import { SaPage, SaPageHeader, SaStatusBadge, providerLabel } from '../saPage';
 
 const SAVED_MASK = '••••••••';
 
@@ -85,7 +85,11 @@ function ProviderSummary({ title, kind, block, active }) {
     <div className="premium-card" style={{ padding: 14, minWidth: 0 }}>
       <strong>{title}</strong>
       {active && <div style={{ fontSize: 12, color: '#047857', fontWeight: 700, marginTop: 4 }}>Active provider</div>}
-      <div style={{ fontSize: 13, marginTop: 6 }}>{ready ? 'Configured' : 'Not configured'} · {modeLabel(kind, block?.mode)} · {block?.enabled ? 'Enabled' : 'Disabled'}</div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+        <SaStatusBadge status={ready ? 'active' : 'disabled'}>{ready ? 'Configured' : 'Not configured'}</SaStatusBadge>
+        <SaStatusBadge status={block?.mode === 'live' ? 'pending' : 'open'}>{modeLabel(kind, block?.mode)}</SaStatusBadge>
+        <SaStatusBadge status={block?.enabled ? 'active' : 'disabled'}>{block?.enabled ? 'Enabled' : 'Disabled'}</SaStatusBadge>
+      </div>
       {kind === 'razorpay' && block?.keySecretSet && <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Saved key secret: {SAVED_MASK}</div>}
       {kind === 'paypal' && block?.clientSecretSet && <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Saved client secret: {SAVED_MASK}</div>}
     </div>
@@ -107,14 +111,13 @@ export function PaymentProvidersHome({ onOpen }) {
     await save({ activeProvider, confirmActiveProvider: true });
   };
   return (
-    <div id="sa-payment-providers" style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
-      <div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpen('landing')}><ArrowLeft size={14} /> Payments</button>
-        <h2 style={{ fontSize: 22, fontWeight: 800, margin: '8px 0 0' }}>Payment providers</h2>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-          Active provider: <strong>{cfg.activeProvider}</strong>. {cfg.paymentsEnabled ? 'Payments are enabled for that provider.' : 'Payments stay off until the active provider has keys saved.'} Nothing here switches a provider to live by itself.
-        </p>
-      </div>
+    <SaPage id="sa-payment-providers">
+      <SaPageHeader
+        onBack={() => onOpen('landing')}
+        backLabel="Payments"
+        title="Payment providers"
+        subtitle={`Active provider: ${providerLabel(cfg.activeProvider)}. ${cfg.paymentsEnabled ? 'Payments are enabled for that provider.' : 'Payments stay off until the active provider has keys saved.'} Nothing here switches a provider to live by itself.`}
+      />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: 12 }}>
         <ProviderSummary title="Razorpay" kind="razorpay" block={cfg.razorpay} active={cfg.activeProvider === 'razorpay'} />
         <ProviderSummary title="PayPal" kind="paypal" block={cfg.paypal} active={cfg.activeProvider === 'paypal'} />
@@ -137,7 +140,7 @@ export function PaymentProvidersHome({ onOpen }) {
         <button type="button" className="btn btn-secondary" onClick={() => onOpen('razorpay')}>Razorpay details</button>
         <button type="button" className="btn btn-secondary" onClick={() => onOpen('paypal')}>PayPal details</button>
       </div>
-    </div>
+    </SaPage>
   );
 }
 
@@ -189,14 +192,13 @@ export function RazorpayProviderPage({ onOpen }) {
     if (next) setForm(f => ({ ...f, keySecret: '', webhookSecret: '', makeActive: false }));
   };
   return (
-    <div id="sa-provider-razorpay" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      <div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpen('providers')}><ArrowLeft size={14} /> Payment providers</button>
-        <h2 style={{ fontSize: 22, fontWeight: 800, margin: '8px 0 0' }}>Razorpay</h2>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-          {configured('razorpay', cfg.razorpay) ? 'Configured' : 'Not configured'} · {modeLabel('razorpay', cfg.razorpay?.mode)}. Keys are encrypted at rest. Leave a secret blank to keep the current value.
-        </p>
-      </div>
+    <SaPage id="sa-provider-razorpay">
+      <SaPageHeader
+        onBack={() => onOpen('providers')}
+        backLabel="Payment providers"
+        title="Razorpay"
+        subtitle={`${configured('razorpay', cfg.razorpay) ? 'Configured' : 'Not configured'} · ${modeLabel('razorpay', cfg.razorpay?.mode)}. Keys are encrypted at rest. Leave a secret blank to keep the current value.`}
+      />
       <form className="premium-card" style={{ padding: 16 }} onSubmit={onSave}>
         <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 8 }}>
           <input type="checkbox" checked={form.enabled} onChange={e => setForm(f => ({ ...f, enabled: e.target.checked }))} />
@@ -225,7 +227,7 @@ export function RazorpayProviderPage({ onOpen }) {
         <VerificationStatus cfg={cfg} testError={testError} />
         {cfg.activeProvider !== 'razorpay' && <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>The test checks the saved active provider ({cfg.activeProvider}), which may not be Razorpay.</p>}
       </form>
-    </div>
+    </SaPage>
   );
 }
 
@@ -268,14 +270,13 @@ export function PaypalProviderPage({ onOpen }) {
     if (next) setForm(f => ({ ...f, clientSecret: '', makeActive: false }));
   };
   return (
-    <div id="sa-provider-paypal" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      <div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpen('providers')}><ArrowLeft size={14} /> Payment providers</button>
-        <h2 style={{ fontSize: 22, fontWeight: 800, margin: '8px 0 0' }}>PayPal</h2>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-          {configured('paypal', cfg.paypal) ? 'Configured' : 'Not configured'} · {modeLabel('paypal', cfg.paypal?.mode)}. Leave a secret blank to keep the current value.
-        </p>
-      </div>
+    <SaPage id="sa-provider-paypal">
+      <SaPageHeader
+        onBack={() => onOpen('providers')}
+        backLabel="Payment providers"
+        title="PayPal"
+        subtitle={`${configured('paypal', cfg.paypal) ? 'Configured' : 'Not configured'} · ${modeLabel('paypal', cfg.paypal?.mode)}. Leave a secret blank to keep the current value.`}
+      />
       <form className="premium-card" style={{ padding: 16 }} onSubmit={onSave}>
         <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 8 }}>
           <input type="checkbox" checked={form.enabled} onChange={e => setForm(f => ({ ...f, enabled: e.target.checked }))} />
@@ -304,6 +305,6 @@ export function PaypalProviderPage({ onOpen }) {
         <VerificationStatus cfg={cfg} testError={testError} />
         {cfg.activeProvider !== 'paypal' && <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>The test checks the saved active provider ({cfg.activeProvider}), which may not be PayPal.</p>}
       </form>
-    </div>
+    </SaPage>
   );
 }

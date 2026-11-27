@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
+import { SaPage, SaPageHeader } from '../saPage';
 
 export function BillingPolicyPage({ onOpen }) {
   const [billing, setBilling] = useState(null);
@@ -26,15 +26,16 @@ export function BillingPolicyPage({ onOpen }) {
     } catch (e) { toast.error(e.message || 'Could not save billing policy'); }
     finally { setBusy(false); }
   };
-  if (!billing) return <div id="sa-billing-policy" style={{ padding: 16 }}>Loading billing policy…</div>;
+  if (!billing) return <SaPage id="sa-billing-policy"><p style={{ margin: 0 }}>Loading billing policy…</p></SaPage>;
   const absorbed = billing.gatewayFeesAbsorbed !== false;
   return (
-    <div id="sa-billing-policy" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      <div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpen('landing')}><ArrowLeft size={14} /> Payments</button>
-        <h2 style={{ fontSize: 22, fontWeight: 800, margin: '8px 0 0' }}>Billing policy</h2>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>Required before new plan activation. There is no default GST rate.</p>
-      </div>
+    <SaPage id="sa-billing-policy">
+      <SaPageHeader
+        onBack={() => onOpen('landing')}
+        backLabel="Payments"
+        title="Billing policy"
+        subtitle="Required before new plan activation. There is no default GST rate."
+      />
       <div className="premium-card" style={{ padding: 16 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 10 }}>
           <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Currency
@@ -75,6 +76,6 @@ export function BillingPolicyPage({ onOpen }) {
         <button type="button" className="btn btn-primary" style={{ marginTop: 12 }} disabled={busy} onClick={save}>Save billing policy</button>
         {!billing.configured && <span style={{ marginLeft: 10, fontSize: 12, color: '#b45309' }}>Not configured — new plan activation is blocked.</span>}
       </div>
-    </div>
+    </SaPage>
   );
 }

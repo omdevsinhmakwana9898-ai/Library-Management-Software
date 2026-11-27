@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
-import { SaModal } from '../SaModal';
 import { FiltersMenu } from '../FiltersMenu';
+import { SaEmpty, SaFact, SaFactList, SaList, SaListRow, SaPage, SaPageHeader, SaStatusBadge, statusLabel } from '../saPage';
 
 const emptyForm = { name: '', rewardMinor: 0, rewardBucket: 'bonus', startsAt: '', endsAt: '', planIds: '', maxRewards: '', allowTrials: false, allow100PercentPromo: false };
 const emptyQuery = { q: '', active: '', status: '' };
 const day = (d) => (d ? String(d).slice(0, 10) : '');
+const rupees = (minor) => `₹${(Number(minor || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export function ReferralsPage({ onOpen }) {
   const [campaigns, setCampaigns] = useState([]);
@@ -16,7 +16,8 @@ export function ReferralsPage({ onOpen }) {
   const [draft, setDraft] = useState(emptyQuery);
   const [form, setForm] = useState(emptyForm);
   const [editing, setEditing] = useState(null);
-  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [screen, setScreen] = useState('list');
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState(1);
 
@@ -42,24 +43,21 @@ export function ReferralsPage({ onOpen }) {
   const chips = [];
   if (query.q) chips.push({ key: 'q', label: `Search: ${query.q}`, onDismiss: () => { setPage(1); setQuery({ ...query, q: '' }); } });
   if (query.active) chips.push({ key: 'active', label: query.active === 'true' ? 'Active campaigns' : 'Inactive campaigns', onDismiss: () => setQuery({ ...query, active: '' }) });
-  if (query.status) chips.push({ key: 'status', label: query.status, onDismiss: () => { setPage(1); setQuery({ ...query, status: '' }); } });
+  if (query.status) chips.push({ key: 'status', label: statusLabel(query.status), onDismiss: () => { setPage(1); setQuery({ ...query, status: '' }); } });
 
-  const startCreate = () => { setEditing(null); setForm(emptyForm); setOpen(true); };
-  const startEdit = (c) => {
-    setEditing(c);
-    setForm({
-      name: c.name || '',
-      rewardMinor: c.rewardMinor || 0,
-      rewardBucket: c.rewardBucket || 'bonus',
-      startsAt: day(c.startsAt),
-      endsAt: day(c.endsAt),
-      planIds: (c.planIds || []).join(', '),
-      maxRewards: c.maxRewards ?? '',
-      allowTrials: !!c.allowTrials,
-      allow100PercentPromo: !!c.allow100PercentPromo,
-    });
-    setOpen(true);
-  };
+  const fill = (c) => ({
+    name: c.name || '',
+    rewardMinor: c.rewardMinor || 0,
+    rewardBucket: c.rewardBucket || 'bonus',
+    startsAt: day(c.startsAt),
+    endsAt: day(c.endsAt),
+    planIds: (c.planIds || []).join(', '),
+    maxRewards: c.maxRewards ?? '',
+    allowTrials: !!c.allowTrials,
+    allow100PercentPromo: !!c.allow100PercentPromo,
+  });
+  const startCreate = () => { setEditing(null); setForm(emptyForm); setScreen('editor'); };
+  const openCampaign = (c, next = 'detail') => { setEditing(c); setForm(fill(c)); setScreen(next); };
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
@@ -74,25 +72,102 @@ export function ReferralsPage({ onOpen }) {
       };
       if (editing) await api.adminUpdateReferralCampaign(editing.campaignId, body);
       else await api.adminCreateReferralCampaign(body);
-      setOpen(false);
+      setScreen('list');
       toast.success(editing ? 'Campaign updated' : 'Referral campaign created');
       await load(query, page);
     } catch (err) { toast.error(err.message || 'Could not save campaign'); }
     finally { setBusy(false); }
   };
+  const toggle = async (c) => {
+    try {
+      const next = await api.adminUpdateReferralCampaign(c.campaignId, { active: c.active === false });
+      setEditing({ ...c, ...(next && typeof next === 'object' ? next : { active: c.active === false }) });
+      await load(query, page);
+    } catch (e) { toast.error(e.message); }
+  };
+
+  if (screen === 'editor') {
+    return (
+      <SaPage id="sa-referrals">
+        <SaPageHeader
+          onBack={() => setScreen(editing ? 'detail' : 'list')}
+          backLabel={editing ? 'Campaign' : 'Referral campaigns'}
+          title={editing ? 'Edit referral campaign' : 'New referral campaign'}
+          subtitle="A reward follows the first genuine paid subscription. Saving does not pay out rewards."
+        />
+        <form className="premium-card" style={{ padding: 16, display: 'grid', gap: 10 }} onSubmit={submit}>
+          <label className="form-label">Name<input className="form-input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
+          <label className="form-label">Reward (paise)<input className="form-input" value={form.rewardMinor} onChange={e => setForm({ ...form, rewardMinor: e.target.value })} /></label>
+          <label className="form-label">Reward type<select className="form-select" value={form.rewardBucket} onChange={e => setForm({ ...form, rewardBucket: e.target.value })}><option value="bonus">Bonus</option><option value="cash">Cash</option></select></label>
+          <label className="form-label">Eligible plans<input className="form-input" value={form.planIds} onChange={e => setForm({ ...form, planIds: e.target.value })} placeholder="All plans" /></label>
+          <label className="form-label">Max rewards<input className="form-input" value={form.maxRewards} onChange={e => setForm({ ...form, maxRewards: e.target.value })} placeholder="Unlimited" /></label>
+          <label className="form-label">Starts<input className="form-input" type="date" value={form.startsAt} onChange={e => setForm({ ...form, startsAt: e.target.value })} /></label>
+          <label className="form-label">Ends<input className="form-input" type="date" value={form.endsAt} onChange={e => setForm({ ...form, endsAt: e.target.value })} /></label>
+          <label style={{ display: 'flex', gap: 6, fontSize: 13 }}><input type="checkbox" checked={form.allowTrials} onChange={e => setForm({ ...form, allowTrials: e.target.checked })} /> Allow trials (off unless this campaign enables it)</label>
+          <label style={{ display: 'flex', gap: 6, fontSize: 13 }}><input type="checkbox" checked={form.allow100PercentPromo} onChange={e => setForm({ ...form, allow100PercentPromo: e.target.checked })} /> Allow 100% promo (off unless this campaign enables it)</label>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>Qualifying event stays the first genuine paid subscription. Saving does not create a payout.</p>
+          <div className="sa-action-row" style={{ justifyContent: 'flex-end' }}>
+            <button type="button" className="btn btn-secondary" onClick={() => setScreen(editing ? 'detail' : 'list')}>Cancel</button>
+            <button className="btn btn-primary" disabled={busy}>{editing ? 'Save campaign' : 'Create campaign'}</button>
+          </div>
+        </form>
+      </SaPage>
+    );
+  }
+
+  if (screen === 'detail' && editing) {
+    const c = editing;
+    return (
+      <SaPage id="sa-referrals">
+        <SaPageHeader
+          onBack={() => setScreen('list')}
+          backLabel="Referral campaigns"
+          title={c.name || 'Campaign'}
+          subtitle="Reward eligibility is only after a qualifying first genuine paid subscription."
+          actions={<button type="button" className="btn btn-primary" onClick={() => openCampaign(c, 'editor')}>Edit</button>}
+        />
+        <div className="sa-action-row">
+          <SaStatusBadge status={c.active === false ? 'inactive' : 'active'}>{c.active === false ? 'Inactive' : 'Active'}</SaStatusBadge>
+        </div>
+        <SaFactList>
+          <SaFact label="Reward">{rupees(c.rewardMinor)} · {c.rewardBucket === 'cash' ? 'Cash' : 'Bonus'}</SaFact>
+          <SaFact label="Qualifying event">First genuine paid subscription</SaFact>
+          <SaFact label="Trials">{c.allowTrials ? 'Allowed' : 'Not rewarded'}</SaFact>
+          <SaFact label="100% promo">{c.allow100PercentPromo ? 'Allowed' : 'Not rewarded'}</SaFact>
+          <SaFact label="Plans">{(c.planIds || []).length ? c.planIds.join(', ') : 'All plans'}</SaFact>
+          <SaFact label="Max rewards">{c.maxRewards || 'Unlimited'}</SaFact>
+        </SaFactList>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>This page does not pay out rewards, and editing a rate does not rewrite rewards already credited.</p>
+        <button type="button" className="btn btn-secondary" onClick={() => toggle(c)}>{c.active === false ? 'Enable' : 'Disable'}</button>
+      </SaPage>
+    );
+  }
+
+  if (screen === 'referral' && selected) {
+    const r = selected;
+    return (
+      <SaPage id="sa-referrals">
+        <SaPageHeader onBack={() => setScreen('list')} backLabel="Referral campaigns" title={r.code || 'Referral'} subtitle="One referral record." />
+        <SaStatusBadge status={r.status} />
+        <SaFactList>
+          <SaFact label="Referring library">{r.referrerLibraryName || r.referrerTenantId || '—'}</SaFact>
+          <SaFact label="Referred library">{r.referredLibraryName || r.referredTenantId || '—'}</SaFact>
+          <SaFact label="Reward">{rupees(r.rewardMinor)}</SaFact>
+          <SaFact label="Invoice">{r.invoiceId || '—'}</SaFact>
+        </SaFactList>
+      </SaPage>
+    );
+  }
 
   return (
-    <div id="sa-referrals" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpen('landing')}><ArrowLeft size={14} /> Payments</button>
-          <h2 style={{ fontSize: 22, fontWeight: 800, margin: '8px 0 0' }}>Referral campaigns</h2>
-        </div>
-        <button type="button" className="btn btn-primary btn-sm" onClick={startCreate}>+ New campaign</button>
-      </div>
-      <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
-        Reward eligibility is only after a qualifying first genuine paid subscription, including a fully wallet-funded one. Trials and 100% promos do not qualify unless that option is already enabled on the campaign. This page does not pay out rewards, and editing a rate does not rewrite rewards already credited.
-      </p>
+    <SaPage id="sa-referrals">
+      <SaPageHeader
+        onBack={() => onOpen('landing')}
+        backLabel="Payments"
+        title="Referral campaigns"
+        subtitle="Reward eligibility is only after a qualifying first genuine paid subscription, including a fully wallet-funded one. This page does not pay out rewards."
+        actions={<button type="button" className="btn btn-primary" onClick={startCreate}>New campaign</button>}
+      />
       <FiltersMenu
         buttonId="sa-referrals-filters-button"
         menuId="sa-referrals-filters-menu"
@@ -112,7 +187,7 @@ export function ReferralsPage({ onOpen }) {
           </select>
         </label>
         <label className="form-label" style={{ margin: 0 }}>Referral history status
-          <select className="form-input" value={draft.status} onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}>
+          <select className="form-select" value={draft.status} onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}>
             <option value="">All</option>
             <option value="pending">Pending</option>
             <option value="qualified">Qualified</option>
@@ -121,54 +196,47 @@ export function ReferralsPage({ onOpen }) {
           </select>
         </label>
       </FiltersMenu>
-      <SaModal open={open} title={editing ? 'Edit referral campaign' : 'New referral campaign'} onClose={() => setOpen(false)}>
-        <form onSubmit={submit} style={{ display: 'grid', gap: 10 }}>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Name<input className="form-input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Reward (minor units)<input className="form-input" value={form.rewardMinor} onChange={e => setForm({ ...form, rewardMinor: e.target.value })} /></label>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Bucket<select className="form-input" value={form.rewardBucket} onChange={e => setForm({ ...form, rewardBucket: e.target.value })}><option value="bonus">Bonus</option><option value="cash">Cash</option></select></label>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Eligible plans<input className="form-input" value={form.planIds} onChange={e => setForm({ ...form, planIds: e.target.value })} placeholder="All plans" /></label>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Max rewards<input className="form-input" value={form.maxRewards} onChange={e => setForm({ ...form, maxRewards: e.target.value })} placeholder="Unlimited" /></label>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Starts<input className="form-input" type="date" value={form.startsAt} onChange={e => setForm({ ...form, startsAt: e.target.value })} /></label>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Ends<input className="form-input" type="date" value={form.endsAt} onChange={e => setForm({ ...form, endsAt: e.target.value })} /></label>
-          <label style={{ display: 'flex', gap: 6, fontSize: 13 }}><input type="checkbox" checked={form.allowTrials} onChange={e => setForm({ ...form, allowTrials: e.target.checked })} /> Allow trials (off unless this campaign enables it)</label>
-          <label style={{ display: 'flex', gap: 6, fontSize: 13 }}><input type="checkbox" checked={form.allow100PercentPromo} onChange={e => setForm({ ...form, allow100PercentPromo: e.target.checked })} /> Allow 100% promo (off unless this campaign enables it)</label>
-          <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}>Qualifying event stays the first genuine paid subscription. Saving does not create a payout.</p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
-            <button className="btn btn-primary" disabled={busy}>{editing ? 'Save campaign' : 'Create campaign'}</button>
-          </div>
-        </form>
-      </SaModal>
-      {campaigns.map(c => (
-        <div key={c.campaignId} className="premium-card" style={{ padding: 12, fontSize: 13, minWidth: 0 }}>
-          <div style={{ overflowWrap: 'anywhere' }}><strong>{c.name}</strong> · reward {c.rewardMinor} {c.rewardBucket} · {c.active === false ? 'inactive' : 'active'}</div>
-          <div>Qualifying event: first genuine paid subscription · trials {c.allowTrials ? 'allowed' : 'not rewarded'} · 100% promo {c.allow100PercentPromo ? 'allowed' : 'not rewarded'}</div>
-          <div>{(c.planIds || []).length ? `Plans: ${c.planIds.join(', ')}` : 'All plans'}{c.maxRewards ? ` · max ${c.maxRewards}` : ''}</div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => startEdit(c)}>Edit</button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={async () => { try { await api.adminUpdateReferralCampaign(c.campaignId, { active: c.active === false }); await load(query, page); } catch (e) { toast.error(e.message); } }}>{c.active === false ? 'Enable' : 'Disable'}</button>
-          </div>
-        </div>
-      ))}
-      {campaigns.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>No campaign configured.</div>}
-      <div className="premium-card" style={{ padding: 12, minWidth: 0 }}>
+      {campaigns.length === 0 && <SaEmpty title="No campaign configured">Create a campaign when you are ready to offer a referral reward.</SaEmpty>}
+      {campaigns.length > 0 && (
+        <SaList>
+          {campaigns.map(c => (
+            <SaListRow
+              key={c.campaignId}
+              title={c.name}
+              meta={`Reward ${rupees(c.rewardMinor)} · ${c.rewardBucket === 'cash' ? 'Cash' : 'Bonus'}`}
+              extra="First genuine paid subscription"
+              status={c.active === false ? 'inactive' : 'active'}
+              onClick={() => openCampaign(c)}
+            />
+          ))}
+        </SaList>
+      )}
+      <div className="premium-card" style={{ padding: 16, minWidth: 0 }}>
         <strong>Referral history</strong>
-        <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '4px 0 8px' }}>{history?.policy}</p>
-        {(history?.items || []).map(r => (
-          <div key={r.referralId} style={{ borderTop: '1px solid var(--border-light, #e5e7eb)', padding: '8px 0', fontSize: 13, overflowWrap: 'anywhere' }}>
-            {r.code} · {r.referrerTenantId} → {r.referredTenantId} · {r.status} · reward {r.rewardMinor || 0}
-            {r.invoiceId ? ` · ${r.invoiceId}` : ''}
-          </div>
-        ))}
-        {history && history.items?.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>No referral rows match.</div>}
+        {history?.policy && <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 8px' }}>{history.policy}</p>}
+        {(history?.items || []).length === 0 && <SaEmpty title="No referral rows match">Clear the history status filter to see more.</SaEmpty>}
+        {(history?.items || []).length > 0 && (
+          <SaList>
+            {history.items.map(r => (
+              <SaListRow
+                key={r.referralId}
+                title={r.code || 'Referral'}
+                meta={rupees(r.rewardMinor)}
+                extra={r.invoiceId || 'No invoice yet'}
+                status={r.status}
+                onClick={() => { setSelected(r); setScreen('referral'); }}
+              />
+            ))}
+          </SaList>
+        )}
         {history && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+          <div className="sa-action-row" style={{ marginTop: 8, alignItems: 'center' }}>
             <button type="button" className="btn btn-secondary btn-sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Previous</button>
             <span style={{ fontSize: 13 }}>Page {history.page} of {history.pages}</span>
             <button type="button" className="btn btn-secondary btn-sm" disabled={page >= history.pages} onClick={() => setPage(p => p + 1)}>Next</button>
           </div>
         )}
       </div>
-    </div>
+    </SaPage>
   );
 }

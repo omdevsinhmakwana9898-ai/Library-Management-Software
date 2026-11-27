@@ -92,6 +92,21 @@ export function billingGroup(inv) {
   return 'not_collected';
 }
 
+/** Non-overlapping list buckets. Paid top-ups stay with wallet top-ups, not paid receipts. */
+export const BILLING_BUCKETS = ['wallet_topups', 'paid_receipts', 'other_invoices'];
+
+export function billingBucket(inv) {
+  if (inv?.kind === 'topup') return 'wallet_topups';
+  if (inv?.status === 'paid') return 'paid_receipts';
+  return 'other_invoices';
+}
+
+function bucketMatch(bucket) {
+  if (bucket === 'wallet_topups') return { kind: 'topup' };
+  if (bucket === 'paid_receipts') return { status: 'paid', kind: { $ne: 'topup' } };
+  return { kind: { $ne: 'topup' }, status: { $ne: 'paid' } };
+}
+
 function collectedCopy(inv) {
   if (inv.status !== 'paid') {
     return { collected: false, collectedNote: 'Open, pending, failed, expired, and void invoices are not collected money.' };
@@ -128,6 +143,7 @@ function present(inv, lib, owner) {
     ownerEmail: owner?.email || lib?.contactEmail || null,
     ownerPhone: owner?.mobile || lib?.phone || null,
     group: billingGroup(inv),
+    bucket: billingBucket(inv),
     collected: money.collected,
     collectedNote: money.collectedNote,
     resendEligible: inv.status === 'paid',
@@ -206,25 +222,31 @@ export async function searchBillingHistory(query = {}) {
     if (tenants.length) ors.push({ tenantId: { $in: tenants } });
     and.push({ $or: ors });
   }
-  const filter = and.length ? { $and: and } : {};
+  const bucket = String(query.bucket || '').trim();
+  if (bucket && !BILLING_BUCKETS.includes(bucket)) throw bad('Unknown billing bucket');
+  const baseFilter = and.length ? { $and: and } : {};
+  const listAnd = bucket ? [...and, bucketMatch(bucket)] : and;
+  const filter = listAnd.length ? { $and: listAnd } : {};
   const [total, rows, grouped] = await Promise.all([
     SoftwareInvoice.countDocuments(filter),
     SoftwareInvoice.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
     SoftwareInvoice.aggregate([
-      { $match: filter },
+      { $match: baseFilter },
       { $group: { _id: { status: '$status', kind: '$kind' }, n: { $sum: 1 } } },
     ]),
   ]);
   let openWalletTopups = 0;
   let paidReceipts = 0;
   let notCollected = 0;
+  const buckets = { wallet_topups: 0, paid_receipts: 0, other_invoices: 0 };
   for (const g of grouped) {
     const n = g.n || 0;
     const fake = { status: g._id?.status, kind: g._id?.kind };
-    const bucket = billingGroup(fake);
-    if (bucket === 'open_wallet_topup') openWalletTopups += n;
-    else if (bucket === 'paid_receipt') paidReceipts += n;
+    const legacy = billingGroup(fake);
+    if (legacy === 'open_wallet_topup') openWalletTopups += n;
+    else if (legacy === 'paid_receipt') paidReceipts += n;
     else notCollected += n;
+    buckets[billingBucket(fake)] += n;
   }
   const { libs, owners } = await directory(rows.map(r => r.tenantId));
   return {
@@ -235,6 +257,8 @@ export async function searchBillingHistory(query = {}) {
     pages: Math.max(1, Math.ceil(total / limit)),
     range: { preset: range.preset, from: range.from, to: range.to, timezone: COLLECTION_TZ },
     statusMap: BILLING_STATUS_MAP,
+    bucket: bucket || null,
+    buckets,
     totals: { matched: total, openWalletTopups, paidReceipts, notCollected },
     notes: {
       collected: 'Only status paid is collected money. Open and settling (pending) are not.',

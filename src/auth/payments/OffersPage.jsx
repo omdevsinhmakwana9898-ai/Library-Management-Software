@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
-import { SaModal } from '../SaModal';
 import { FiltersMenu } from '../FiltersMenu';
+import { SaEmpty, SaFact, SaFactList, SaList, SaListRow, SaPage, SaPageHeader, SaStatusBadge } from '../saPage';
 
 const emptyForm = { name: '', code: '', discountType: 'percentage', discountValue: 10, perTenantLimit: 1, usageLimit: '', planIds: '', startsAt: '', endsAt: '', stackable: false };
 const emptyQuery = { q: '', status: '' };
@@ -28,7 +27,7 @@ export function OffersPage({ onOpen }) {
   const [draft, setDraft] = useState(emptyQuery);
   const [form, setForm] = useState(emptyForm);
   const [editing, setEditing] = useState(null);
-  const [open, setOpen] = useState(false);
+  const [screen, setScreen] = useState('list');
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async (next) => {
@@ -46,8 +45,8 @@ export function OffersPage({ onOpen }) {
   if (query.q) chips.push({ key: 'q', label: `Search: ${query.q}`, onDismiss: () => setQuery({ ...query, q: '' }) });
   if (query.status) chips.push({ key: 'status', label: query.status, onDismiss: () => setQuery({ ...query, status: '' }) });
 
-  const startCreate = () => { setEditing(null); setForm(emptyForm); setOpen(true); };
-  const startEdit = (o) => {
+  const startCreate = () => { setEditing(null); setForm(emptyForm); setScreen('editor'); };
+  const openOffer = (o, next = 'detail') => {
     setEditing(o);
     setForm({
       name: o.name || '',
@@ -61,8 +60,9 @@ export function OffersPage({ onOpen }) {
       endsAt: day(o.endsAt),
       stackable: !!o.stackable,
     });
-    setOpen(true);
+    setScreen(next);
   };
+  const startEdit = (o) => openOffer(o, 'editor');
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
@@ -70,27 +70,93 @@ export function OffersPage({ onOpen }) {
       const body = toBody(form);
       if (editing) await api.adminUpdateOffer(editing.offerId, body);
       else await api.adminCreateOffer(body);
-      setOpen(false);
+      setScreen('list');
       toast.success(editing ? 'Offer updated' : 'Offer created');
       await load(query);
     } catch (err) { toast.error(err.message || 'Could not save offer'); }
     finally { setBusy(false); }
   };
   const patch = async (o, body) => {
-    try { await api.adminUpdateOffer(o.offerId, body); await load(query); }
-    catch (e) { toast.error(e.message); }
+    try {
+      const next = await api.adminUpdateOffer(o.offerId, body);
+      setEditing({ ...o, ...body, ...(next && typeof next === 'object' ? next : {}) });
+      await load(query);
+    } catch (e) { toast.error(e.message); }
   };
 
-  return (
-    <div id="sa-offers" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpen('landing')}><ArrowLeft size={14} /> Payments</button>
-          <h2 style={{ fontSize: 22, fontWeight: 800, margin: '8px 0 0' }}>Offers</h2>
+  const offerBadge = (o) => (o.archived ? 'archived' : o.active === false ? 'inactive' : 'available');
+  const discount = (o) => (o.discountType === 'percentage' ? `${o.discountValue}%` : `₹${(Number(o.discountValue || 0) / 100).toFixed(2)}`);
+
+  if (screen === 'editor') {
+    return (
+      <SaPage id="sa-offers">
+        <SaPageHeader
+          onBack={() => setScreen(editing ? 'detail' : 'list')}
+          backLabel={editing ? 'Offer' : 'Offers'}
+          title={editing ? 'Edit offer' : 'New offer'}
+          subtitle="Saving does not rewrite discounts already applied to invoices or redemptions."
+        />
+        <form className="premium-card" style={{ padding: 16, display: 'grid', gap: 10 }} onSubmit={submit}>
+          <label className="form-label">Name<input className="form-input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
+          <label className="form-label">Code<input className="form-input" value={form.code} onChange={e => setForm({ ...form, code: e.target.value.toUpperCase() })} required /></label>
+          <label className="form-label">Type<select className="form-select" value={form.discountType} onChange={e => setForm({ ...form, discountType: e.target.value })}><option value="percentage">Percent</option><option value="fixed">Fixed rupees</option></select></label>
+          <label className="form-label">Value<input className="form-input" value={form.discountValue} onChange={e => setForm({ ...form, discountValue: e.target.value })} required /></label>
+          <label className="form-label">Total uses<input className="form-input" inputMode="numeric" value={form.usageLimit} onChange={e => setForm({ ...form, usageLimit: e.target.value })} placeholder="Unlimited" /></label>
+          <label className="form-label">Per-library uses<input className="form-input" inputMode="numeric" value={form.perTenantLimit} onChange={e => setForm({ ...form, perTenantLimit: e.target.value })} /></label>
+          <label className="form-label">Eligible plans<input className="form-input" value={form.planIds} onChange={e => setForm({ ...form, planIds: e.target.value })} placeholder="All plans" /></label>
+          <label className="form-label">Starts<input className="form-input" type="date" value={form.startsAt} onChange={e => setForm({ ...form, startsAt: e.target.value })} /></label>
+          <label className="form-label">Ends<input className="form-input" type="date" value={form.endsAt} onChange={e => setForm({ ...form, endsAt: e.target.value })} /></label>
+          <label style={{ display: 'flex', gap: 6, fontSize: 13 }}><input type="checkbox" checked={form.stackable} onChange={e => setForm({ ...form, stackable: e.target.checked })} /> Allow stacking where permitted</label>
+          {editing && <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>This does not change historical redemptions. Usage shown on the list stays the settled count.</p>}
+          <div className="sa-action-row" style={{ justifyContent: 'flex-end' }}>
+            <button type="button" className="btn btn-secondary" onClick={() => setScreen(editing ? 'detail' : 'list')}>Cancel</button>
+            <button className="btn btn-primary" disabled={busy}>{editing ? 'Save offer' : 'Create offer'}</button>
+          </div>
+        </form>
+      </SaPage>
+    );
+  }
+
+  if (screen === 'detail' && editing) {
+    const o = editing;
+    return (
+      <SaPage id="sa-offers">
+        <SaPageHeader
+          onBack={() => setScreen('list')}
+          backLabel="Offers"
+          title={o.code || 'Offer'}
+          subtitle={o.name || 'Offer details'}
+          actions={<button type="button" className="btn btn-primary" onClick={() => startEdit(o)}>Edit</button>}
+        />
+        <div className="sa-action-row">
+          <SaStatusBadge status={offerBadge(o)}>{statusOf(o)}</SaStatusBadge>
         </div>
-        <button type="button" className="btn btn-primary btn-sm" onClick={startCreate}>+ New offer</button>
-      </div>
-      <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>Editing an offer does not rewrite discounts already applied to invoices or redemptions.</p>
+        <SaFactList>
+          <SaFact label="Discount">{discount(o)}</SaFact>
+          <SaFact label="Used">{o.usedCount || 0}{o.usageLimit ? ` / ${o.usageLimit}` : ''}</SaFact>
+          <SaFact label="Stacking">{o.stackable ? 'Allowed' : 'One offer'}</SaFact>
+          <SaFact label="Plans">{(o.planIds || []).length ? o.planIds.join(', ') : 'All plans'}</SaFact>
+          <SaFact label="Starts">{o.startsAt ? new Date(o.startsAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'No start date'}</SaFact>
+          <SaFact label="Ends">{o.endsAt ? new Date(o.endsAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'No end date'}</SaFact>
+        </SaFactList>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>Editing an offer does not rewrite discounts already applied to invoices or redemptions.</p>
+        <div className="sa-action-row">
+          <button type="button" className="btn btn-secondary" onClick={() => patch(o, { active: o.active === false })}>{o.active === false ? 'Enable' : 'Disable'}</button>
+          <button type="button" className="btn btn-ghost" onClick={() => { if (!o.archived && !window.confirm('Archive this offer? Already-applied discounts stay as they are.')) return; patch(o, { archived: !o.archived }); }}>{o.archived ? 'Unarchive' : 'Archive'}</button>
+        </div>
+      </SaPage>
+    );
+  }
+
+  return (
+    <SaPage id="sa-offers">
+      <SaPageHeader
+        onBack={() => onOpen('landing')}
+        backLabel="Payments"
+        title="Offers"
+        subtitle="Editing an offer does not rewrite discounts already applied to invoices or redemptions."
+        actions={<button type="button" className="btn btn-primary" onClick={startCreate}>New offer</button>}
+      />
       <FiltersMenu
         buttonId="sa-offers-filters-button"
         menuId="sa-offers-filters-menu"
@@ -111,38 +177,26 @@ export function OffersPage({ onOpen }) {
           </select>
         </label>
       </FiltersMenu>
-      <SaModal open={open} title={editing ? 'Edit offer' : 'New offer'} onClose={() => setOpen(false)}>
-        <form onSubmit={submit} style={{ display: 'grid', gap: 10 }}>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Name<input className="form-input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></label>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Code<input className="form-input" value={form.code} onChange={e => setForm({ ...form, code: e.target.value.toUpperCase() })} required /></label>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Type<select className="form-input" value={form.discountType} onChange={e => setForm({ ...form, discountType: e.target.value })}><option value="percentage">%</option><option value="fixed">₹ fixed</option></select></label>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Value<input className="form-input" value={form.discountValue} onChange={e => setForm({ ...form, discountValue: e.target.value })} required /></label>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Total uses<input className="form-input" inputMode="numeric" value={form.usageLimit} onChange={e => setForm({ ...form, usageLimit: e.target.value })} placeholder="Unlimited" /></label>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Per-library uses<input className="form-input" inputMode="numeric" value={form.perTenantLimit} onChange={e => setForm({ ...form, perTenantLimit: e.target.value })} /></label>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Eligible plans (IDs, comma separated)<input className="form-input" value={form.planIds} onChange={e => setForm({ ...form, planIds: e.target.value })} placeholder="All plans" /></label>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Starts<input className="form-input" type="date" value={form.startsAt} onChange={e => setForm({ ...form, startsAt: e.target.value })} /></label>
-          <label style={{ display: 'grid', gap: 4, fontSize: 13 }}>Ends<input className="form-input" type="date" value={form.endsAt} onChange={e => setForm({ ...form, endsAt: e.target.value })} /></label>
-          <label style={{ display: 'flex', gap: 6, fontSize: 13 }}><input type="checkbox" checked={form.stackable} onChange={e => setForm({ ...form, stackable: e.target.checked })} /> Allow stacking where permitted</label>
-          {editing && <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}>This does not change historical redemptions. Usage shown on the list stays the settled count.</p>}
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
-            <button className="btn btn-primary" disabled={busy}>{editing ? 'Save offer' : 'Create offer'}</button>
-          </div>
-        </form>
-      </SaModal>
-      {(offers || []).map(o => (
-        <div key={o.offerId} className="premium-card" style={{ padding: 12, fontSize: 13, minWidth: 0 }}>
-          <div style={{ overflowWrap: 'anywhere' }}><strong>{o.code}</strong> · {o.name} · {o.discountType === 'percentage' ? `${o.discountValue}%` : `₹${(Number(o.discountValue || 0) / 100).toFixed(2)}`} · used {o.usedCount || 0}{o.usageLimit ? `/${o.usageLimit}` : ''}</div>
-          <div>{statusOf(o)} · {o.stackable ? 'stackable' : 'single offer'}{(o.planIds || []).length ? ` · plans: ${o.planIds.join(', ')}` : ' · all plans'}</div>
-          <div>{o.startsAt ? `Starts ${new Date(o.startsAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })} · ` : ''}{o.endsAt ? `Ends ${new Date(o.endsAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}` : 'No end date'}</div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => startEdit(o)}>Edit</button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => patch(o, { active: o.active === false })}>{o.active === false ? 'Enable' : 'Disable'}</button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { if (!o.archived && !window.confirm('Archive this offer? Already-applied discounts stay as they are.')) return; patch(o, { archived: !o.archived }); }}>{o.archived ? 'Unarchive' : 'Archive'}</button>
-          </div>
-        </div>
-      ))}
-      {offers.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>No offers match.</div>}
-    </div>
+      {offers.length === 0 && (
+        <SaEmpty title="No offers match">
+          Clear the filters, or create a new offer.
+        </SaEmpty>
+      )}
+      {offers.length > 0 && (
+        <SaList>
+          {offers.map(o => (
+            <SaListRow
+              key={o.offerId}
+              title={o.code}
+              meta={o.name}
+              extra={`${discount(o)} · used ${o.usedCount || 0}${o.usageLimit ? `/${o.usageLimit}` : ''}`}
+              status={offerBadge(o)}
+              badge={<SaStatusBadge status={offerBadge(o)}>{statusOf(o)}</SaStatusBadge>}
+              onClick={() => openOffer(o)}
+            />
+          ))}
+        </SaList>
+      )}
+    </SaPage>
   );
 }
