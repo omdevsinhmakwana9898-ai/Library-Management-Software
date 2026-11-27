@@ -4,7 +4,9 @@ import toast from 'react-hot-toast';
 import { api } from '../utils/api';
 import { FiltersMenu } from './FiltersMenu';
 import { DURATION_ROWS, durationPayload, durationsFromPlan, emptyDurations, setMonthlyKeepingDiscounts } from '../utils/softwarePlanForm';
-import { SaEmpty, SaFact, SaFactList, SaPage, SaPageHeader, SaStatusBadge, SaSummaryCard, SaSummaryGrid } from './saPage';
+import {
+  SaEmpty, SaFact, SaHelper, SaMoreInfo, SaPage, SaPageHeader, SaRecordActions, SaRecordHero, SaRecordSection, SaRecordTimeline, SaStatusBadge,
+} from './saPage';
 
 const EMPTY = {
   name: '', description: '', icon: '', priceMonthly: '', studentLimit: '', staffLimit: '', branchLimit: '', deskLimit: '',
@@ -141,50 +143,63 @@ export function SoftwarePlansCatalog({ onChanged }) {
   ].filter(Boolean);
 
   if (screen === 'details' && detail) {
+    const planDates = [
+      detail.createdAt ? { label: 'Created', at: new Date(detail.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) } : null,
+      detail.updatedAt ? { label: 'Updated', at: new Date(detail.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) } : null,
+    ].filter(Boolean);
     return (
       <SaPage id="sa-plan-details">
         <SaPageHeader
           onBack={backToCatalog}
           backLabel="Software plans"
           title={detail.name}
-          subtitle={detail.description || 'Plan details for future quotes and signups.'}
-          actions={(
+          subtitle={detail.description || null}
+        />
+        <SaRecordHero
+          name={detail.name}
+          amount={inr(detail.priceMonthly)}
+          badge={(
             <>
-              <button type="button" className="btn btn-secondary" onClick={() => startEdit(detail)}>Edit</button>
-              <button type="button" className="btn btn-secondary" onClick={() => toggleArchive(detail)}>{detail.active ? 'Archive' : 'Restore'}</button>
+              <SaStatusBadge status={detail.active ? 'active' : 'archived'}>{detail.active ? 'Active' : 'Archived'}</SaStatusBadge>
+              {detail.active ? <SaStatusBadge status={detail.public ? 'public' : 'hidden'}>{visibilityLabel(detail)}</SaStatusBadge> : null}
+              {detail.recommended ? <SaStatusBadge status="active">Recommended</SaStatusBadge> : null}
             </>
           )}
         />
-        <SaSummaryGrid>
-          <SaSummaryCard label="Monthly" value={inr(detail.priceMonthly)} sub={detail.recommended ? 'Recommended' : 'Catalog price'} tone="#eff6ff" />
-          <SaSummaryCard label="Yearly" value={inr(yearlyAmount(detail))} />
-          <SaSummaryCard label="Libraries" value={detail.libraries} sub={detail.libraries === 1 ? 'library assigned' : 'libraries assigned'} />
-        </SaSummaryGrid>
-        <div className="sa-action-row">
-          <SaStatusBadge status={detail.active ? 'active' : 'archived'}>{detail.active ? 'Active' : 'Archived'}</SaStatusBadge>
-          <SaStatusBadge status={detail.public && detail.active ? 'public' : 'hidden'}>{visibilityLabel(detail)}</SaStatusBadge>
-          {detail.recommended ? <SaStatusBadge status="active">Recommended</SaStatusBadge> : null}
-        </div>
-        <SaFactList>
+        <SaRecordTimeline steps={planDates} />
+        <SaRecordSection title="Price">
+          <SaFact label="Monthly">{inr(detail.priceMonthly)}</SaFact>
+          <SaFact label="Yearly">{inr(yearlyAmount(detail))}</SaFact>
+          <SaFact label="Libraries">{detail.libraries} {detail.libraries === 1 ? 'library assigned' : 'libraries assigned'}</SaFact>
+        </SaRecordSection>
+        <SaRecordSection title="Capacity">
           <SaFact label="Seat capacity">{fmtLimit(detail.deskLimit)}</SaFact>
           <SaFact label="Branches">{fmtLimit(detail.branchLimit)}</SaFact>
           <SaFact label="Staff logins">{fmtLimit(detail.staffLimit)}</SaFact>
           <SaFact label="Students">{fmtLimit(detail.studentLimit)}</SaFact>
           <SaFact label="Trial">{detail.trialDays ? `${detail.trialDays}-day trial` : 'No trial'}</SaFact>
           <SaFact label="WhatsApp">{detail.whatsappIncluded ? 'WhatsApp included' : 'WhatsApp not included'}</SaFact>
-        </SaFactList>
-        <div className="premium-card" style={{ padding: 16 }}>
-          <strong>Enabled features</strong>
-          {(detail.features || []).length === 0 && <p style={{ margin: '8px 0 0', color: 'var(--text-secondary)' }}>None listed. Add features from Edit.</p>}
-          <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>{(detail.features || []).map(f => <li key={f}>{f}</li>)}</ul>
-          {(detail.highlights || []).length > 0 && (
-            <>
-              <strong style={{ display: 'block', marginTop: 12 }}>Shown to owners</strong>
-              <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>{detail.highlights.map(f => <li key={f}>{f}</li>)}</ul>
-            </>
-          )}
-        </div>
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>Catalog prices apply to future public pages, signups, and upgrade quotes. They do not change paid invoices, open invoice amounts, or a library’s current subscription period or price.</p>
+        </SaRecordSection>
+        <SaRecordSection title="Features">
+          <div style={{ gridColumn: '1 / -1', minWidth: 0 }}>
+            {(detail.features || []).length === 0 && <p style={{ margin: 0, color: 'var(--text-secondary)' }}>None listed. Add features from Edit.</p>}
+            <ul style={{ margin: 0, paddingLeft: 18 }}>{(detail.features || []).map(f => <li key={f}>{f}</li>)}</ul>
+            {(detail.highlights || []).length > 0 && (
+              <>
+                <strong style={{ display: 'block', marginTop: 12 }}>Shown to owners</strong>
+                <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>{detail.highlights.map(f => <li key={f}>{f}</li>)}</ul>
+              </>
+            )}
+          </div>
+        </SaRecordSection>
+        <SaMoreInfo>
+          <SaFact label="Plan id">{detail.planId || '—'}</SaFact>
+        </SaMoreInfo>
+        <SaHelper>Catalog prices apply to future public pages, signups, and upgrade quotes. They do not change paid invoices, open invoice amounts, or a library’s current subscription period or price.</SaHelper>
+        <SaRecordActions>
+          <button type="button" className="btn btn-secondary" onClick={() => startEdit(detail)}>Edit</button>
+          <button type="button" className="btn btn-secondary" onClick={() => toggleArchive(detail)}>{detail.active ? 'Archive' : 'Restore'}</button>
+        </SaRecordActions>
       </SaPage>
     );
   }

@@ -15,6 +15,8 @@ test('software catalog and library plans are separate super admin pages', () => 
   assert.match(catalog, /id="sa-software-plans-catalog"/);
   assert.match(catalog, /id="sa-plan-editor"/);
   assert.match(catalog, /id="sa-plan-details"/);
+  assert.match(catalog, /SaRecordHero/);
+  assert.match(catalog, /SaRecordTimeline steps=\{planDates\}/);
   assert.match(catalog, /screen === 'details'/);
   assert.match(catalog, /screen === 'editor'/);
   assert.match(catalog, /Software plans/);
