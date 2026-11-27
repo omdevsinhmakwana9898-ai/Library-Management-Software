@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Undo2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
-import { FiltersMenu } from '../FiltersMenu';
-import { BackLink, Choice, PERIODS, SaleRecorder, STATUS_HELP, SummaryCards, inr, qs, rateText } from './shared';
+import { DatePeriodSelect, FiltersMenu, datePeriodLabel } from '../FiltersMenu';
+import { BackLink, SaleRecorder, STATUS_HELP, SummaryCards, inr, qs, rateText } from './shared';
 
 const empty = { q: '', partnerId: '', libraryId: '', kind: '', status: '', preset: 'all_time', from: '', to: '', page: 1 };
 const STATUSES = [
@@ -48,7 +48,7 @@ export function CommissionsPage({ libraries, onOpen, onChanged, seed }) {
     query.q && { key: 'q', label: `Search: ${query.q}`, onDismiss: () => setQuery({ ...query, q: '', page: 1 }) },
     query.partnerId && { key: 'partner', label: partnerName, onDismiss: () => setQuery({ ...query, partnerId: '', page: 1 }) },
     query.libraryId && { key: 'library', label: libraryName, onDismiss: () => setQuery({ ...query, libraryId: '', page: 1 }) },
-    query.preset !== 'all_time' && { key: 'period', label: PERIODS.find(([id]) => id === query.preset)?.[1] || query.preset, onDismiss: () => setQuery({ ...query, preset: 'all_time', from: '', to: '', page: 1 }) },
+    query.preset !== 'all_time' && { key: 'period', label: datePeriodLabel(query.preset, query), onDismiss: () => setQuery({ ...query, preset: 'all_time', from: '', to: '', page: 1 }) },
     query.kind && { key: 'kind', label: query.kind === 'initial' ? 'New sale' : 'Renewal', onDismiss: () => setQuery({ ...query, kind: '', page: 1 }) },
     query.status && { key: 'status', label: STATUSES.find(([id]) => id === query.status)?.[1] || query.status, onDismiss: () => setQuery({ ...query, status: '', page: 1 }) },
   ].filter(Boolean);
@@ -81,6 +81,15 @@ export function CommissionsPage({ libraries, onOpen, onChanged, seed }) {
         onClose={() => setDraft(query)}
         applyDisabled={loading || (draft.preset === 'custom' && (!draft.from || !draft.to))}
       >
+        <DatePeriodSelect
+          id="sa-commissions-filters-period"
+          value={draft.preset || 'all_time'}
+          onChange={(preset) => setDraft(d => ({ ...d, preset }))}
+          from={draft.from}
+          to={draft.to}
+          onFromChange={(from) => setDraft(d => ({ ...d, from }))}
+          onToChange={(to) => setDraft(d => ({ ...d, to }))}
+        />
         <label className="form-label" style={{ margin: 0 }}>Partner
           <input className="form-input" value={draft.q} onChange={e => setDraft(d => ({ ...d, q: e.target.value }))} placeholder="Name, email, or invoice ref" />
           <select className="form-input" style={{ marginTop: 6 }} value={draft.partnerId} onChange={e => setDraft(d => ({ ...d, partnerId: e.target.value }))}>
@@ -94,15 +103,6 @@ export function CommissionsPage({ libraries, onOpen, onChanged, seed }) {
             {libraries.map(l => <option key={l.libraryId} value={l.libraryId}>{l.name}</option>)}
           </select>
         </label>
-        <div role="group" aria-label="Period" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {PERIODS.map(([id, label]) => <Choice key={id} label={label} pressed={draft.preset === id} onClick={() => setDraft(d => ({ ...d, preset: id }))} />)}
-        </div>
-        {draft.preset === 'custom' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <label className="form-label" style={{ margin: 0 }}>From<input className="form-input" type="date" value={draft.from} onChange={e => setDraft(d => ({ ...d, from: e.target.value }))} required /></label>
-            <label className="form-label" style={{ margin: 0 }}>To<input className="form-input" type="date" value={draft.to} onChange={e => setDraft(d => ({ ...d, to: e.target.value }))} required /></label>
-          </div>
-        )}
         <label className="form-label" style={{ margin: 0 }}>Type
           <select className="form-input" value={draft.kind} onChange={e => setDraft(d => ({ ...d, kind: e.target.value }))}>
             <option value="">New sale and renewal</option>
@@ -110,10 +110,10 @@ export function CommissionsPage({ libraries, onOpen, onChanged, seed }) {
             <option value="renewal">Renewal</option>
           </select>
         </label>
-        <label className="form-label" style={{ margin: 0 }}>Status
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
-            {STATUSES.map(([id, label]) => <Choice key={id || 'all'} label={label} pressed={(draft.status || '') === id} onClick={() => setDraft(d => ({ ...d, status: id }))} />)}
-          </div>
+        <label className="form-label" htmlFor="sa-commissions-filters-status" style={{ margin: 0 }}>Status
+          <select id="sa-commissions-filters-status" className="form-input" value={draft.status || ''} onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}>
+            {STATUSES.map(([id, label]) => <option key={id || 'all'} value={id}>{label}</option>)}
+          </select>
         </label>
       </FiltersMenu>
       <div className="premium-card sa-table-card" style={{ padding: 0 }}>

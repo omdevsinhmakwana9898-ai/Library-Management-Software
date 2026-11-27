@@ -2,6 +2,8 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { setup, teardown, call, ctx } from './helpers.js';
+import { presetRange } from '../src/businessCollections.js';
+import { PARTNER_PERIOD_PRESETS } from '../src/partners.js';
 
 let partner, agent;
 before(async () => {
@@ -60,6 +62,16 @@ test('directory search, filters, and pagination stay additive', async () => {
   assert.equal(old.body.total, 0);
   const month = await call('GET', '/api/admin/partners?page=1&preset=this_month', { token: ctx.tokens.sa });
   assert.ok(month.body.total >= 2);
+  const older = ['all_time', 'last_7_days', 'this_month', 'last_month', 'last_2_months', 'last_3_months', 'last_6_months', 'last_1_year', 'custom'];
+  for (const preset of older) assert.ok(PARTNER_PERIOD_PRESETS.includes(preset), preset);
+  assert.ok(PARTNER_PERIOD_PRESETS.includes('last_3_years'));
+  const years = await call('GET', '/api/admin/partners?page=1&preset=last_3_years', { token: ctx.tokens.sa });
+  assert.equal(years.status, 200, JSON.stringify(years.body));
+  const span = presetRange('last_3_years');
+  assert.equal(years.body.range.from, span.from);
+  assert.equal(years.body.range.to, span.to);
+  assert.ok(years.body.total >= 2);
+  assert.equal((await call('GET', '/api/admin/partners?page=1&preset=nope', { token: ctx.tokens.sa })).status, 400);
 
   const summary = await call('GET', '/api/admin/partner-summary', { token: ctx.tokens.sa });
   assert.ok(summary.body.activePartners >= 2);
@@ -91,6 +103,14 @@ test('commission search, filters, and pagination do not rewrite frozen rows', as
   const today = await call('GET', '/api/admin/commissions?page=1&preset=this_month&q=PAGE-', { token: ctx.tokens.sa });
   assert.equal(today.body.items.some(r => r.saleRef === 'PAGE-1'), false);
   assert.equal(today.body.items.some(r => r.saleRef === 'PAGE-2'), true);
+  const years = await call('GET', '/api/admin/commissions?page=1&preset=last_3_years&q=PAGE-', { token: ctx.tokens.sa });
+  assert.equal(years.status, 200, JSON.stringify(years.body));
+  const span = presetRange('last_3_years');
+  assert.equal(years.body.range.from, span.from);
+  assert.equal(years.body.range.to, span.to);
+  assert.equal(years.body.items.some(r => r.saleRef === 'PAGE-1'), false);
+  assert.equal(years.body.items.some(r => r.saleRef === 'PAGE-2'), true);
+  assert.equal((await call('GET', '/api/admin/commissions?page=1&preset=nope', { token: ctx.tokens.sa })).status, 400);
 
   const p1 = await call('GET', '/api/admin/commissions?page=1&limit=1&q=PAGE-', { token: ctx.tokens.sa });
   const p2 = await call('GET', '/api/admin/commissions?page=2&limit=1&q=PAGE-', { token: ctx.tokens.sa });

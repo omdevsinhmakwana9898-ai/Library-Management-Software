@@ -6,18 +6,6 @@ import { SaModal } from '../SaModal';
 
 export const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
-export const PERIODS = [
-  ['all_time', 'All time'],
-  ['last_7_days', 'Last 7 days'],
-  ['this_month', 'This month'],
-  ['last_month', 'Last month'],
-  ['last_2_months', 'Last 2 months'],
-  ['last_3_months', 'Last 3 months'],
-  ['last_6_months', 'Last 6 months'],
-  ['last_1_year', '1 year'],
-  ['custom', 'Custom'],
-];
-
 export const PERM_LABEL = {
   accessLibrary: 'Access Library (read-only)',
   viewClients: 'See clients',
@@ -38,10 +26,6 @@ export const qs = (o) => {
   const s = p.toString();
   return s ? `?${s}` : '';
 };
-
-export function Choice({ label, pressed, onClick }) {
-  return <button type="button" className={`btn btn-sm ${pressed ? 'btn-primary' : 'btn-secondary'}`} style={{ justifyContent: 'flex-start', width: '100%' }} aria-pressed={pressed} onClick={onClick}>{label}</button>;
-}
 
 export function BackLink({ onClick, children }) {
   return <button type="button" className="btn btn-ghost btn-sm" onClick={onClick}><ArrowLeft size={14} /> {children}</button>;

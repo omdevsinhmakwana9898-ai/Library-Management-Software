@@ -11,6 +11,8 @@ const commissions = readFileSync(new URL('../src/auth/partners/CommissionsPage.j
 const record = readFileSync(new URL('../src/auth/partners/CommissionRecordPage.jsx', import.meta.url), 'utf8');
 const notes = readFileSync(new URL('../src/auth/partners/PayoutNotesPage.jsx', import.meta.url), 'utf8');
 const portal = readFileSync(new URL('../src/auth/PartnerPortal.jsx', import.meta.url), 'utf8');
+const filtersMenu = readFileSync(new URL('../src/auth/FiltersMenu.jsx', import.meta.url), 'utf8');
+const presets = readFileSync(new URL('../server/src/partners.js', import.meta.url), 'utf8');
 
 test('partners landing links to the dedicated super admin pages', () => {
   assert.match(dash, /id="sa-tab-partners"/);
@@ -28,6 +30,35 @@ test('partners landing links to the dedicated super admin pages', () => {
   assert.match(commissions, /sa-commissions-filters-button/);
   assert.match(commissions, /sa-commissions-filters-menu/);
   assert.match(commissions, /FiltersMenu/);
+  assert.match(notes, /sa-payout-records-filters-button/);
+  assert.match(notes, /sa-payout-records-filters-menu/);
+  for (const [file, id] of [
+    [directory, 'sa-partners-filters-period'],
+    [commissions, 'sa-commissions-filters-period'],
+    [notes, 'sa-payout-records-filters-period'],
+  ]) {
+    assert.match(file, /DatePeriodSelect/);
+    assert.match(file, new RegExp(`id="${id}"`));
+    assert.match(file, /preset: 'all_time'/);
+    assert.match(file, /!== 'all_time'/);
+    const period = file.lastIndexOf('<DatePeriodSelect');
+    assert.ok(period > file.indexOf('filters-menu'));
+    assert.ok(period < file.indexOf('<select', period));
+    assert.doesNotMatch(file, /PERIODS\.map/);
+    assert.doesNotMatch(file, /aria-label="Period"/);
+    assert.doesNotMatch(file, /aria-pressed/);
+  }
+  assert.match(filtersMenu, /export function DatePeriodSelect/);
+  assert.match(filtersMenu, /<select id=\{id\}/);
+  assert.match(filtersMenu, /value === 'custom'/);
+  assert.match(filtersMenu, />From/);
+  assert.match(filtersMenu, />To/);
+  assert.match(filtersMenu, /type="date"/);
+  assert.match(commissions, /<select id="sa-commissions-filters-status"/);
+  assert.match(presets, /'last_3_years'/);
+  assert.match(presets, /'last_7_days'/);
+  assert.match(presets, /'last_1_year'/);
+  assert.match(presets, /'custom'/);
   assert.match(landing, /open owner question/i);
   assert.match(assignments, /never earn a new-sale commission/);
   assert.match(assignments, /original seller cannot be changed once set/i);

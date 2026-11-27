@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../../utils/api';
-import { FiltersMenu } from '../FiltersMenu';
-import { BackLink, Choice, PERIODS, inr, qs } from './shared';
+import { DatePeriodSelect, FiltersMenu, datePeriodLabel } from '../FiltersMenu';
+import { BackLink, inr, qs } from './shared';
 
 const empty = { q: '', partnerId: '', libraryId: '', preset: 'all_time', from: '', to: '', page: 1 };
 
@@ -43,13 +43,22 @@ export function PayoutNotesPage({ libraries, onOpen }) {
         chips={[
           query.partnerId && { key: 'partner', label: seller(query.partnerId), onDismiss: () => setQuery({ ...query, partnerId: '', page: 1 }) },
           query.libraryId && { key: 'library', label: libName(query.libraryId), onDismiss: () => setQuery({ ...query, libraryId: '', page: 1 }) },
-          query.preset !== 'all_time' && { key: 'period', label: query.preset, onDismiss: () => setQuery({ ...query, preset: 'all_time', from: '', to: '', page: 1 }) },
+          query.preset !== 'all_time' && { key: 'period', label: datePeriodLabel(query.preset, query), onDismiss: () => setQuery({ ...query, preset: 'all_time', from: '', to: '', page: 1 }) },
         ].filter(Boolean)}
         onApply={apply}
         onReset={reset}
         onClose={() => setDraft(query)}
         applyDisabled={loading || (draft.preset === 'custom' && (!draft.from || !draft.to))}
       >
+        <DatePeriodSelect
+          id="sa-payout-records-filters-period"
+          value={draft.preset || 'all_time'}
+          onChange={(preset) => setDraft(d => ({ ...d, preset }))}
+          from={draft.from}
+          to={draft.to}
+          onFromChange={(from) => setDraft(d => ({ ...d, from }))}
+          onToChange={(to) => setDraft(d => ({ ...d, to }))}
+        />
         <label className="form-label" style={{ margin: 0 }}>Partner
           <select className="form-input" value={draft.partnerId} onChange={e => setDraft(d => ({ ...d, partnerId: e.target.value }))}>
             <option value="">Any seller</option>
@@ -62,15 +71,6 @@ export function PayoutNotesPage({ libraries, onOpen }) {
             {libraries.map(l => <option key={l.libraryId} value={l.libraryId}>{l.name}</option>)}
           </select>
         </label>
-        <div role="group" aria-label="Period" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {PERIODS.map(([id, label]) => <Choice key={id} label={label} pressed={draft.preset === id} onClick={() => setDraft(d => ({ ...d, preset: id }))} />)}
-        </div>
-        {draft.preset === 'custom' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <label className="form-label" style={{ margin: 0 }}>From<input className="form-input" type="date" value={draft.from} onChange={e => setDraft(d => ({ ...d, from: e.target.value }))} required /></label>
-            <label className="form-label" style={{ margin: 0 }}>To<input className="form-input" type="date" value={draft.to} onChange={e => setDraft(d => ({ ...d, to: e.target.value }))} required /></label>
-          </div>
-        )}
       </FiltersMenu>
       <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0 }}>{data?.note} {data?.paymentExecuted === false ? 'paymentExecuted is false.' : ''}</p>
       <div className="premium-card sa-table-card" style={{ padding: 0 }}>

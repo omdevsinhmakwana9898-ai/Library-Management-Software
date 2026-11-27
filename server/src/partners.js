@@ -109,7 +109,7 @@ export const COMMISSION_LABEL_MAP = {
   },
 };
 
-export const PARTNER_PERIOD_PRESETS = ['all_time', 'last_7_days', 'this_month', 'last_month', 'last_2_months', 'last_3_months', 'last_6_months', 'last_1_year', 'custom'];
+export const PARTNER_PERIOD_PRESETS = ['all_time', 'last_7_days', 'this_month', 'last_month', 'last_2_months', 'last_3_months', 'last_6_months', 'last_1_year', 'last_3_years', 'custom'];
 
 const requirementLabel = (r) => {
   if (r.payoutStatus === 'paid') return 'paid';
