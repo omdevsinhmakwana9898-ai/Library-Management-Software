@@ -2,8 +2,10 @@
  * Spec §8 SA-01.
  * - SaaS dashboard (`GET /admin/saas-summary`): OUR business only — customer libraries, growth,
  *   activity, plus KPIs contributed by other modules (partners/commissions, support tickets) via
- *   registerSaasKpi(). Subscription/trial/software-revenue KPIs belong to §5 billing (out of scope)
- *   and are reported as `notAvailable`. No customer students/seats/fees/expenses here.
+ *   registerSaasKpi(). Software collection for the current month is `softwareRevenue`
+ *   (gateway cash on verified paid subscription/upgrade invoices). Trials, WhatsApp
+ *   add-on revenue and overdue invoices stay in `notAvailable`. No customer
+ *   students/seats/fees/expenses here.
  * - Library Insights & Analytics (`GET /admin/insights`, `/admin/insights/export.csv`): aggregated
  *   customer operational data, no student PII, filters (date, tenant, city, plan), every access audited.
  * Every aggregation is matched on an explicit tenantId list.
@@ -13,6 +15,7 @@ import { Library, models, User } from './models.js';
 import { audit } from './audit.js';
 import { todayIn } from './finance.js';
 import { SoftwarePlan } from './plans.js';
+import { currentMonthSoftwareCollection } from './businessCollections.js';
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const kpiProviders = [];
@@ -54,8 +57,9 @@ export async function saasSummary() {
     },
     accounts: { owners: users.filter(u => u.role === 'client_admin').length, staff: users.filter(u => u.role !== 'client_admin').length },
     kpis,
-    notAvailable: ['activeSubscriptions', 'trials', 'upcomingExpiries', 'softwareRevenue', 'whatsappAddonRevenue', 'overdueInvoices'],
-    notAvailableReason: 'Subscriptions and billing (spec §5) are not built yet.',
+    softwareRevenue: await currentMonthSoftwareCollection(),
+    notAvailable: ['activeSubscriptions', 'trials', 'upcomingExpiries', 'whatsappAddonRevenue', 'overdueInvoices'],
+    notAvailableReason: 'Trials, WhatsApp add-on revenue and overdue-invoice KPIs are not on this dashboard. Current-month software collection is softwareRevenue.',
     list: libs.map(l => {
       const owner = users.find(u => u.tenantId === l.libraryId && u.role === 'client_admin');
       return { libraryId: l.libraryId, name: l.name, status: l.status, city: l.city || null, createdAt: l.createdAt,
