@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../utils/api';
 import { FiltersMenu } from './FiltersMenu';
+import { SaEmpty, SaList, SaListRow, SaPage, SaPageHeader, SaStatusBadge } from './saPage';
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 const empty = { q: '', plan: '', subscription: '', account: '', renewal: '', expiry: '', expiryFrom: '', expiryTo: '', expiredMonths: '', sort: 'name', dir: 'asc', page: 1, pageSize: 25 };
@@ -86,13 +87,20 @@ export function LibraryPlans({ onOpen }) {
   const from = total ? (data.page - 1) * data.pageSize + 1 : 0;
   const to = total ? Math.min(total, data.page * data.pageSize) : 0;
 
+  const subscriptionTone = (label) => {
+    const text = String(label || '').toLowerCase();
+    if (text.includes('expir') && !text.includes('expired')) return 'expiring';
+    if (text.includes('expired')) return 'expired';
+    if (text.includes('trial')) return 'trial';
+    if (text.includes('cancel')) return 'cancelled';
+    if (text.includes('active')) return 'active';
+    return '';
+  };
+
   return (
-    <div id="sa-library-plans" className="premium-card sa-table-card" style={{ padding: 0 }}>
-      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div>
-          <h3 style={{ margin: 0, fontSize: 16 }}>Library plans</h3>
-          <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-secondary)', maxWidth: 720 }}>Search libraries and open subscription details. Account Enabled/Disabled is separate from the subscription. Renewal outstanding follows open or failed software invoices and past-due subscriptions. Changing a plan does not create a charge.</p>
-        </div>
+    <SaPage id="sa-library-plans">
+      <SaPageHeader title="Library plans" subtitle="Search a library and open its subscription. Changing a plan does not create a charge." />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <FiltersMenu
           buttonId="sa-library-plans-filters-button"
           menuId="sa-library-plans-filters-menu"
@@ -162,48 +170,47 @@ export function LibraryPlans({ onOpen }) {
             </label>
           )}
         </FiltersMenu>
-        {data?.renewalRule && <p style={{ margin: 0, fontSize: 12, color: 'var(--text-tertiary)' }}>{data.renewalRule}</p>}
+        {data?.renewalRule && <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>{data.renewalRule}</p>}
       </div>
-      <div className="table-container">
-        <table className="data-grid" style={{ width: '100%', minWidth: 860 }}>
-          <thead>
-            <tr>
-              {[
-                ['name', 'Library'],
-                ['owner', 'Owner'],
-                ['plan', 'Plan'],
-                ['expiry', 'Expiry'],
-                ['subscription', 'Subscription'],
-                ['account', 'Account'],
-                ['renewal', 'Renewal'],
-              ].map(([key, label]) => (
-                <th key={key} aria-sort={query.sort === key ? (query.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                  <button type="button" className="btn btn-ghost btn-sm" style={{ padding: 0, minHeight: 0, fontWeight: 700 }} onClick={() => sortBy(key)}>{label}{arrow(key)}</button>
-                </th>
-              ))}
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && <tr><td colSpan={8}>Loading…</td></tr>}
-            {!loading && items.length === 0 && <tr><td colSpan={8}>No libraries match these filters.</td></tr>}
-            {items.map(l => (
-              <tr key={l.libraryId}>
-                <td><strong>{l.name}</strong><div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{l.libraryId}</div></td>
-                <td style={{ fontSize: 12 }}>{l.owner?.name || '—'}<div style={{ color: 'var(--text-tertiary)' }}>{l.email || l.mobile || ''}</div></td>
-                <td>{l.planName || 'No plan'}{l.trial ? ' · Trial' : ''}</td>
-                <td>{fmtDate(l.expiry)}</td>
-                <td>{l.subscriptionLabel}</td>
-                <td><span className={`badge ${l.accountStatus === 'Enabled' ? 'badge-active' : 'badge-expired'}`}>{l.accountStatus}</span></td>
-                <td>{l.renewalOutstanding ? 'Outstanding' : '—'}</td>
-                <td>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => onOpen(l.libraryId)}>Subscription</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="sa-sort-bar" role="group" aria-label="Sort library plans">
+        {[
+          ['name', 'Library'],
+          ['owner', 'Owner'],
+          ['plan', 'Plan'],
+          ['expiry', 'Expiry'],
+          ['subscription', 'Subscription'],
+          ['account', 'Account'],
+          ['renewal', 'Renewal'],
+        ].map(([key, label]) => (
+          <button key={key} type="button" className={`btn btn-sm ${query.sort === key ? 'btn-secondary' : 'btn-ghost'}`} aria-sort={query.sort === key ? (query.dir === 'asc' ? 'ascending' : 'descending') : 'none'} onClick={() => sortBy(key)}>{label}{arrow(key)}</button>
+        ))}
       </div>
+      {loading && <p style={{ margin: 0, fontSize: 14, color: 'var(--text-secondary)' }}>Loading…</p>}
+      {!loading && items.length === 0 && (
+        <SaEmpty title="No libraries match these filters">
+          Clear a filter or search for another library.
+        </SaEmpty>
+      )}
+      {items.length > 0 && (
+        <SaList>
+          {items.map(l => (
+            <SaListRow
+              key={l.libraryId}
+              title={l.name}
+              meta={`${l.owner?.name || 'No owner'} · ${l.planName || 'No plan'}${l.trial ? ' · Trial' : ''}`}
+              extra={`Expires ${fmtDate(l.expiry)} · ${l.email || l.mobile || 'No contact'}${l.renewalOutstanding ? ' · Renewal outstanding' : ''}`}
+              onClick={() => onOpen(l.libraryId)}
+              badge={(
+                <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  {l.subscriptionLabel ? <SaStatusBadge status={subscriptionTone(l.subscriptionLabel)}>{l.subscriptionLabel}</SaStatusBadge> : null}
+                  <SaStatusBadge status={l.accountStatus} />
+                  {l.renewalOutstanding ? <SaStatusBadge status="outstanding">Outstanding</SaStatusBadge> : null}
+                </span>
+              )}
+            />
+          ))}
+        </SaList>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', padding: 12, flexWrap: 'wrap', fontSize: 13 }}>
         <span>{total ? `Showing ${from}–${to} of ${total}` : '0 libraries'}</span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -216,6 +223,6 @@ export function LibraryPlans({ onOpen }) {
           <button type="button" className="btn btn-secondary btn-sm" disabled={!data || data.page >= data.pages} onClick={() => setQuery(q => ({ ...q, page: q.page + 1 }))}>Next</button>
         </div>
       </div>
-    </div>
+    </SaPage>
   );
 }

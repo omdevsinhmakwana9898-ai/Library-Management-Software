@@ -1,10 +1,10 @@
 // Super Admin software-plan catalog. Assignment lives on the Library plans page.
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../utils/api';
 import { FiltersMenu } from './FiltersMenu';
 import { DURATION_ROWS, durationPayload, durationsFromPlan, emptyDurations, setMonthlyKeepingDiscounts } from '../utils/softwarePlanForm';
+import { SaEmpty, SaFact, SaFactList, SaPage, SaPageHeader, SaStatusBadge, SaSummaryCard, SaSummaryGrid } from './saPage';
 
 const EMPTY = {
   name: '', description: '', icon: '', priceMonthly: '', studentLimit: '', staffLimit: '', branchLimit: '', deskLimit: '',
@@ -142,49 +142,62 @@ export function SoftwarePlansCatalog({ onChanged }) {
 
   if (screen === 'details' && detail) {
     return (
-      <div id="sa-plan-details" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={backToCatalog}><ArrowLeft size={14} /> Software plans</button>
-          <h2 style={{ fontSize: 22, fontWeight: 800, margin: '8px 0 0' }}>{detail.name}</h2>
-        </div>
-        <div className="premium-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-            <strong style={{ fontSize: 18 }}>{detail.icon || '◆'} {detail.name}</strong>
-            <span>{visibilityLabel(detail)}{detail.recommended ? ' · Recommended' : ''}</span>
-          </div>
-          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{detail.description || 'No description.'}</p>
-          <div>Monthly {inr(detail.priceMonthly)} · Yearly {inr(yearlyAmount(detail))}</div>
-          <div>Seat capacity {fmtLimit(detail.deskLimit)} · Branches {fmtLimit(detail.branchLimit)} · Staff logins {fmtLimit(detail.staffLimit)} · Students {fmtLimit(detail.studentLimit)}</div>
-          <div>{detail.trialDays ? `${detail.trialDays}-day trial` : 'No trial'} · {detail.whatsappIncluded ? 'WhatsApp included' : 'WhatsApp not included'}</div>
-          <div>{detail.libraries} assigned {detail.libraries === 1 ? 'library' : 'libraries'}</div>
-          <div>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>Enabled features</div>
-            {(detail.features || []).length === 0 && <span style={{ color: 'var(--text-tertiary)' }}>None listed.</span>}
-            <ul style={{ margin: 0, paddingLeft: 18 }}>{(detail.features || []).map(f => <li key={f}>{f}</li>)}</ul>
-          </div>
-          {(detail.highlights || []).length > 0 && (
-            <div>
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>Shown to owners</div>
-              <ul style={{ margin: 0, paddingLeft: 18 }}>{detail.highlights.map(f => <li key={f}>{f}</li>)}</ul>
-            </div>
+      <SaPage id="sa-plan-details">
+        <SaPageHeader
+          onBack={backToCatalog}
+          backLabel="Software plans"
+          title={detail.name}
+          subtitle={detail.description || 'Plan details for future quotes and signups.'}
+          actions={(
+            <>
+              <button type="button" className="btn btn-secondary" onClick={() => startEdit(detail)}>Edit</button>
+              <button type="button" className="btn btn-secondary" onClick={() => toggleArchive(detail)}>{detail.active ? 'Archive' : 'Restore'}</button>
+            </>
           )}
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--text-tertiary)' }}>Catalog prices apply to future public pages, signups, and upgrade quotes. They do not change paid invoices, open invoice amounts, or a library’s current subscription period or price.</p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-secondary" onClick={() => startEdit(detail)}>Edit</button>
-            <button type="button" className="btn btn-secondary" onClick={() => toggleArchive(detail)}>{detail.active ? 'Archive' : 'Restore'}</button>
-          </div>
+        />
+        <SaSummaryGrid>
+          <SaSummaryCard label="Monthly" value={inr(detail.priceMonthly)} sub={detail.recommended ? 'Recommended' : 'Catalog price'} tone="#eff6ff" />
+          <SaSummaryCard label="Yearly" value={inr(yearlyAmount(detail))} />
+          <SaSummaryCard label="Libraries" value={detail.libraries} sub={detail.libraries === 1 ? 'library assigned' : 'libraries assigned'} />
+        </SaSummaryGrid>
+        <div className="sa-action-row">
+          <SaStatusBadge status={detail.active ? 'active' : 'archived'}>{detail.active ? 'Active' : 'Archived'}</SaStatusBadge>
+          <SaStatusBadge status={detail.public && detail.active ? 'public' : 'hidden'}>{visibilityLabel(detail)}</SaStatusBadge>
+          {detail.recommended ? <SaStatusBadge status="active">Recommended</SaStatusBadge> : null}
         </div>
-      </div>
+        <SaFactList>
+          <SaFact label="Seat capacity">{fmtLimit(detail.deskLimit)}</SaFact>
+          <SaFact label="Branches">{fmtLimit(detail.branchLimit)}</SaFact>
+          <SaFact label="Staff logins">{fmtLimit(detail.staffLimit)}</SaFact>
+          <SaFact label="Students">{fmtLimit(detail.studentLimit)}</SaFact>
+          <SaFact label="Trial">{detail.trialDays ? `${detail.trialDays}-day trial` : 'No trial'}</SaFact>
+          <SaFact label="WhatsApp">{detail.whatsappIncluded ? 'WhatsApp included' : 'WhatsApp not included'}</SaFact>
+        </SaFactList>
+        <div className="premium-card" style={{ padding: 16 }}>
+          <strong>Enabled features</strong>
+          {(detail.features || []).length === 0 && <p style={{ margin: '8px 0 0', color: 'var(--text-secondary)' }}>None listed. Add features from Edit.</p>}
+          <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>{(detail.features || []).map(f => <li key={f}>{f}</li>)}</ul>
+          {(detail.highlights || []).length > 0 && (
+            <>
+              <strong style={{ display: 'block', marginTop: 12 }}>Shown to owners</strong>
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>{detail.highlights.map(f => <li key={f}>{f}</li>)}</ul>
+            </>
+          )}
+        </div>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>Catalog prices apply to future public pages, signups, and upgrade quotes. They do not change paid invoices, open invoice amounts, or a library’s current subscription period or price.</p>
+      </SaPage>
     );
   }
 
   if (screen === 'editor') {
     return (
-      <div id="sa-plan-editor" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={backToCatalog}><ArrowLeft size={14} /> Software plans</button>
-          <h2 style={{ fontSize: 22, fontWeight: 800, margin: '8px 0 0' }}>{editing ? `Edit ${form.name || 'plan'}` : 'New plan'}</h2>
-        </div>
+      <SaPage id="sa-plan-editor">
+        <SaPageHeader
+          onBack={backToCatalog}
+          backLabel="Software plans"
+          title={editing ? `Edit ${form.name || 'plan'}` : 'New plan'}
+          subtitle="Saving updates future quotes. It does not change paid invoices or a library’s current price."
+        />
         <form className="premium-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }} onSubmit={save} aria-label="Plan form">
           <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)' }}>Saving updates this catalog record for future public pages, signups, and upgrade quotes. It does not change paid invoices, open invoice amounts, or a library’s current subscription period or price.</p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))', gap: 12 }}>
@@ -243,25 +256,23 @@ export function SoftwarePlansCatalog({ onChanged }) {
           <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!!form.recommended} onChange={e => setForm(f => ({ ...f, recommended: e.target.checked }))} /> Recommended</label>
           <label style={{ fontSize: 13, display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={!!form.public} onChange={e => setForm(f => ({ ...f, public: e.target.checked }))} /> Offer on owner signup</label>
           <p style={{ margin: 0, fontSize: 12, color: 'var(--text-tertiary)' }}>Lowering a student, seat, staff, or branch limit is rejected when an assigned library already exceeds the new cap. Those libraries are left unchanged. Fixed usage is checked; nonfixed allocation is not part of this catalog.</p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <div className="sa-action-row" style={{ justifyContent: 'flex-end' }}>
             <button type="button" className="btn btn-secondary" onClick={backToCatalog}>Cancel</button>
             <button type="submit" className="btn btn-primary">Save plan</button>
           </div>
         </form>
-      </div>
+      </SaPage>
     );
   }
 
   return (
-    <div id="sa-software-plans-catalog" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <SaPage id="sa-software-plans-catalog">
+      <SaPageHeader
+        title="Software plans"
+        subtitle="Plans offered to libraries. Assign a plan from Library plans."
+        actions={<button type="button" className="btn btn-primary" onClick={() => startEdit(null)}>+ New plan</button>}
+      />
       <div className="premium-card" style={{ padding: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 16 }}>Software plans catalog</h3>
-            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>Plans offered to libraries. Assigning a plan to a library is on Library plans.</p>
-          </div>
-          <button className="btn btn-primary btn-sm" onClick={() => startEdit(null)}>+ New plan</button>
-        </div>
         <FiltersMenu
           buttonId="sa-software-plans-filters-button"
           menuId="sa-software-plans-filters-menu"
@@ -285,17 +296,23 @@ export function SoftwarePlansCatalog({ onChanged }) {
             </select>
           </label>
         </FiltersMenu>
-        {shown.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 12 }}>No plans match these filters.</p>}
+        {shown.length === 0 && (
+          <div style={{ marginTop: 12 }}>
+            <SaEmpty title="No plans match these filters">
+              Clear the filters, or create a new plan.
+            </SaEmpty>
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 260px), 1fr))', gap: 12, marginTop: 12 }}>
           {shown.map(p => {
             const features = p.features || [];
             return (
-              <div key={p.planId} data-plan={p.planId} role="button" tabIndex={0} onClick={() => openDetails(p)} onKeyDown={e => { if (e.key === 'Enter') openDetails(p); }} style={{ border: '1px solid var(--border-light, #e5e7eb)', borderRadius: 8, padding: 12, opacity: p.active ? 1 : 0.7, cursor: 'pointer', textAlign: 'left', minWidth: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
+              <div key={p.planId} data-plan={p.planId} role="button" tabIndex={0} className="premium-card" onClick={() => openDetails(p)} onKeyDown={e => { if (e.key === 'Enter') openDetails(p); }} style={{ padding: 16, opacity: p.active ? 1 : 0.75, cursor: 'pointer', textAlign: 'left', minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                   <strong style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}><span aria-hidden="true" style={{ fontSize: 18 }}>{p.icon || '◆'}</span><span style={{ overflowWrap: 'anywhere' }}>{p.name}</span></strong>
-                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{visibilityLabel(p)}</span>
+                  <SaStatusBadge status={p.active ? (p.public ? 'public' : 'hidden') : 'archived'}>{visibilityLabel(p)}</SaStatusBadge>
                 </div>
-                <div style={{ fontSize: 18, fontWeight: 700, margin: '6px 0' }}>{inr(p.priceMonthly)}<span style={{ fontSize: 12, fontWeight: 400 }}>/month</span></div>
+                <div style={{ fontSize: 20, fontWeight: 800, margin: '8px 0', letterSpacing: '-0.03em' }}>{inr(p.priceMonthly)}<span style={{ fontSize: 12, fontWeight: 500 }}>/month</span></div>
                 <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{inr(yearlyAmount(p))}<span style={{ fontSize: 12 }}>/year</span>{p.recommended ? <span style={{ fontSize: 11, marginLeft: 6 }}>Recommended</span> : null}</div>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6 }}>Seats: {fmtLimit(p.deskLimit)} · Branches: {fmtLimit(p.branchLimit)} · Staff logins: {fmtLimit(p.staffLimit)} · Students: {fmtLimit(p.studentLimit)}</div>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>{p.trialDays ? `${p.trialDays}-day trial` : 'No trial'} · {p.whatsappIncluded ? 'WhatsApp included' : 'WhatsApp not included'}</div>
@@ -315,6 +332,6 @@ export function SoftwarePlansCatalog({ onChanged }) {
           })}
         </div>
       </div>
-    </div>
+    </SaPage>
   );
 }
