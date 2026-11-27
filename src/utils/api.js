@@ -301,6 +301,7 @@ export const api = {
   adminCollectionRecord: (id) => apiRequest(`/admin/collections/${encodeURIComponent(id)}`),
   adminInsights: (q = '') => apiRequest(`/admin/insights${q}`),
   adminInsightsOverview: () => apiRequest('/admin/insights/overview'),
+  adminLibraryPlans: (q = '') => apiRequest(`/admin/library-plans${q}`),
   adminLibraryDirectory: (q = '') => apiRequest(`/admin/library-directory${q}`),
   adminLibraryDetails: (libraryId) => apiRequest(`/admin/library-directory/${encodeURIComponent(libraryId)}`),
   adminCreateLibrary: (body) => apiRequest('/admin/libraries', { method: 'POST', body }),

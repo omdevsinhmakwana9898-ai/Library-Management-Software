@@ -23,6 +23,14 @@ export const SoftwarePlan = mongoose.models.SoftwarePlan || mongoose.model('Soft
   /** Per-duration discount. Missing means infer from priceMonthly / priceYearly on read. */
   durationPricing: { type: mongoose.Schema.Types.Mixed },
   recommended: { type: Boolean, default: false },
+  /** Optional short mark shown on catalog cards. Empty means the UI uses the plan name. */
+  icon: { type: String, trim: true, default: '' },
+  /**
+   * Optional WhatsApp entitlement. Absent keeps today's behaviour:
+   * a feature line containing "whatsapp" still counts as included.
+   * true/false is an explicit override.
+   */
+  whatsappEntitlement: { type: Boolean },
   active: { type: Boolean, default: true }, // archived plans stay on existing libraries
   public: { type: Boolean, default: true }, // offered at owner signup
   sortOrder: { type: Number, default: 0 },
@@ -30,6 +38,14 @@ export const SoftwarePlan = mongoose.models.SoftwarePlan || mongoose.model('Soft
 }, { timestamps: true }));
 
 const limitText = (n, one, many) => (n > 0 ? `${Number(n).toLocaleString('en-IN')} ${Number(n) === 1 ? one : many}` : `Unlimited ${many}`);
+
+/** Explicit entitlement wins. When unset, a feature line containing "whatsapp" still counts. */
+export function whatsappIncluded(p) {
+  if (!p) return false;
+  if (p.whatsappEntitlement === true) return true;
+  if (p.whatsappEntitlement === false) return false;
+  return (p.features || []).some(f => /whatsapp/i.test(String(f || '')));
+}
 
 /** Feature order: desks (when the field is present), branches, staff, optional student cap, WhatsApp, then the rest. */
 export function planHighlights(p) {
@@ -66,6 +82,9 @@ export const pubPlan = (p) => {
     highlights: planHighlights(shaped),
     trialDays: p.trialDays || 0,
     recommended: !!p.recommended,
+    icon: p.icon || '',
+    whatsappEntitlement: p.whatsappEntitlement === true ? true : p.whatsappEntitlement === false ? false : null,
+    whatsappIncluded: whatsappIncluded(p),
     durationPricing: p.durationPricing || null,
     intervals,
     active: p.active, public: p.public, sortOrder: p.sortOrder || 0,
@@ -90,6 +109,8 @@ export function publicCataloguePlan(p) {
     highlights: pub.highlights,
     trialDays: pub.trialDays,
     recommended: pub.recommended,
+    icon: pub.icon || '',
+    whatsappIncluded: !!pub.whatsappIncluded,
     intervals: (pub.intervals || []).filter(row => row.available),
     active: true,
     public: true,
@@ -126,6 +147,11 @@ export function planInput(body = {}, { creating } = {}) {
   }
   for (const k of ['active', 'public']) if (body[k] !== undefined) set[k] = !!body[k];
   if (body.recommended !== undefined) set.recommended = !!body.recommended;
+  if (body.icon !== undefined) set.icon = String(body.icon || '').trim().slice(0, 16);
+  if (body.whatsappEntitlement !== undefined) {
+    const flag = body.whatsappEntitlement;
+    set.whatsappEntitlement = flag === null || flag === '' || flag === 'auto' ? null : !!flag;
+  }
   if (body.sortOrder !== undefined) set.sortOrder = Number(body.sortOrder) || 0;
   if (body.durationPricing !== undefined) set.durationPricing = normaliseDurationPricing(body.durationPricing);
   return set;
@@ -162,6 +188,49 @@ function legacyYearlyFrom(set) {
 }
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'plan';
+
+const LIMIT_FIELDS = [
+  ['studentLimit', 'students', 'students'],
+  ['staffLimit', 'staff', 'staff logins'],
+  ['branchLimit', 'branches', 'branches'],
+  ['deskLimit', 'desks', 'desks'],
+];
+
+/** A numeric cap is stricter when it is newly finite or lower than the previous finite cap. */
+function limitIsStricter(previous, next) {
+  if (next == null || next === undefined) return false;
+  if (!(previous > 0)) return true;
+  return next < previous;
+}
+
+/**
+ * Reject a lower student/desk/staff/branch cap when an assigned library already
+ * exceeds it. Libraries, subscriptions and invoices are not modified.
+ * Nonfixed seat allocation is not implemented; only current fixed usage is compared.
+ */
+async function assertLowerLimitsFit(existing, set) {
+  const checks = LIMIT_FIELDS.filter(([field]) => limitIsStricter(existing[field], set[field]));
+  if (!checks.length) return;
+  const libs = await Library.find({ planId: existing.planId }).select('libraryId name').lean();
+  if (!libs.length) return;
+  const { usageByLibrary } = await import('./planUsage.js');
+  const usage = await usageByLibrary(libs.map(l => l.libraryId));
+  const conflicts = [];
+  for (const lib of libs) {
+    const used = usage[lib.libraryId] || {};
+    for (const [field, key, label] of checks) {
+      if ((used[key] || 0) > set[field]) {
+        conflicts.push({ libraryId: lib.libraryId, name: lib.name, kind: key, label, used: used[key] || 0, limit: set[field] });
+      }
+    }
+  }
+  if (!conflicts.length) return;
+  const first = conflicts[0];
+  const error = Object.assign(new Error(
+    `Cannot lower the ${first.label} limit to ${first.limit}. ${first.name} already has ${first.used}. Assigned libraries were not changed.`,
+  ), { status: 409, code: 'plan_cap_exceeded', conflicts });
+  throw error;
+}
 
 /** Effective limits: a per-library override (existing studentLimit) wins over the plan. */
 export async function libraryLimits(tenantId) {
@@ -256,6 +325,7 @@ export function createPlanAdminRouter() {
     if (set.recommended && set.active !== false && set.public !== false) {
       await SoftwarePlan.updateMany({ active: true, public: true, recommended: true }, { $set: { recommended: false } });
     }
+    if (set.whatsappEntitlement === null) delete set.whatsappEntitlement;
     const p = await SoftwarePlan.create({ ...set, planId, updatedBy: req.user.email });
     await audit(req, 'plan.created', { target: planId, detail: set });
     res.status(201).json(pubPlan(p));
@@ -280,11 +350,22 @@ export function createPlanAdminRouter() {
       if (yearly !== undefined) set.priceYearly = yearly;
     }
     assertDurationDiscounts(merged);
+    try {
+      await assertLowerLimitsFit(existing, set);
+    } catch (e) {
+      if (e.code !== 'plan_cap_exceeded') throw e;
+      return res.status(409).json({ error: e.message, code: e.code, conflicts: e.conflicts });
+    }
     const willRecommend = merged.recommended && merged.active !== false && merged.public !== false;
     if (willRecommend) {
       await SoftwarePlan.updateMany({ planId: { $ne: existing.planId }, active: true, public: true, recommended: true }, { $set: { recommended: false } });
     }
-    const p = await SoftwarePlan.findOneAndUpdate({ planId: existing.planId }, { $set: { ...set, updatedBy: req.user.email } }, { new: true, lean: true });
+    const update = { $set: { ...set, updatedBy: req.user.email } };
+    if (set.whatsappEntitlement === null) {
+      delete update.$set.whatsappEntitlement;
+      update.$unset = { whatsappEntitlement: 1 };
+    }
+    const p = await SoftwarePlan.findOneAndUpdate({ planId: existing.planId }, update, { new: true, lean: true });
     await audit(req, 'plan.updated', { target: p.planId, detail: set });
     res.json(pubPlan(p));
   }));
