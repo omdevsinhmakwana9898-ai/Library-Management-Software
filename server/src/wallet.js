@@ -11,7 +11,8 @@ export const toMinor = (major) => Math.round(Number(major || 0) * 100);
 export const toMajor = (minor) => Number(minor || 0) / 100;
 
 const lockQueues = new Map();
-async function withTenantLock(tenantId, fn) {
+/** Serializes wallet mutations for one library in this process. Nested calls deadlock. */
+export async function withTenantLock(tenantId, fn) {
   const key = String(tenantId || '');
   const previous = lockQueues.get(key) || Promise.resolve();
   const run = previous.then(fn, fn);
@@ -142,7 +143,68 @@ export async function creditWallet({
   });
 }
 
-export async function holdWallet({ tenantId, amountMinor, purpose = '', invoiceId, topupId }) {
+/** Bonus credits soonest-expiry first, then cash oldest first. Read-only. */
+export async function spendableCredits(tenantId, now = new Date()) {
+  const bonusCredits = await WalletLedger.find({
+    tenantId, kind: 'credit', bucket: 'bonus', remainingMinor: { $gt: 0 },
+    $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
+  }).lean();
+  bonusCredits.sort((a, b) => {
+    if (!a.expiresAt && !b.expiresAt) return new Date(a.createdAt) - new Date(b.createdAt);
+    if (!a.expiresAt) return 1;
+    if (!b.expiresAt) return -1;
+    return new Date(a.expiresAt) - new Date(b.expiresAt) || new Date(a.createdAt) - new Date(b.createdAt);
+  });
+  const cashCredits = await WalletLedger.find({ tenantId, kind: 'credit', bucket: 'cash', remainingMinor: { $gt: 0 } })
+    .sort({ createdAt: 1 }).lean();
+  return [['bonus', bonusCredits], ['cash', cashCredits]];
+}
+
+/** Plans a debit without writing. Bonus is spent before cash, matching holdWallet. */
+export async function previewWalletDebit({ tenantId, amountMinor }) {
+  const amount = Math.round(Number(amountMinor || 0));
+  if (!(amount > 0)) throw fail('Debit amount must be positive', 400);
+  return withTenantLock(tenantId, async () => {
+    const existing = await Wallet.findOne({ tenantId }).lean();
+    if (existing) await _expireBonusCredits(tenantId);
+    const wallet = existing ? await Wallet.findOne({ tenantId }).lean() : null;
+    const before = {
+      currency: wallet?.currency || 'INR',
+      cashMinor: Number(wallet?.cashMinor || 0),
+      bonusMinor: Number(wallet?.bonusMinor || 0),
+      heldCashMinor: Number(wallet?.heldCashMinor || 0),
+      heldBonusMinor: Number(wallet?.heldBonusMinor || 0),
+    };
+    before.availableMinor = availableMinor(before);
+    if (before.availableMinor < amount) {
+      return { ok: false, code: 'insufficient_wallet', amountMinor: amount, cashMinor: 0, bonusMinor: 0, before, after: before };
+    }
+    let left = amount;
+    let cashPart = 0;
+    let bonusPart = 0;
+    for (const [bucket, credits] of await spendableCredits(tenantId)) {
+      for (const c of credits) {
+        if (left <= 0) break;
+        const take = Math.min(left, Number(c.remainingMinor || 0));
+        if (take <= 0) continue;
+        if (bucket === 'bonus') bonusPart += take; else cashPart += take;
+        left -= take;
+      }
+    }
+    if (left > 0) {
+      return { ok: false, code: 'insufficient_wallet', amountMinor: amount, cashMinor: cashPart, bonusMinor: bonusPart, before, after: before };
+    }
+    const after = {
+      ...before,
+      cashMinor: before.cashMinor - cashPart,
+      bonusMinor: before.bonusMinor - bonusPart,
+    };
+    after.availableMinor = availableMinor(after);
+    return { ok: true, amountMinor: amount, cashMinor: cashPart, bonusMinor: bonusPart, before, after };
+  });
+}
+
+export async function holdWallet({ tenantId, amountMinor, purpose = '', invoiceId, topupId, idempotencyKey }) {
   const amount = Math.round(Number(amountMinor || 0));
   if (!(amount > 0)) throw fail('Hold amount must be positive', 400);
   return withTenantLock(tenantId, async () => {
@@ -151,26 +213,11 @@ export async function holdWallet({ tenantId, amountMinor, purpose = '', invoiceI
     const wallet = await ensureWallet(tenantId);
     if (availableMinor(wallet) < amount) throw fail('Insufficient wallet balance', 409, 'insufficient_wallet');
 
-    const now = new Date();
-    const bonusCredits = await WalletLedger.find({
-      tenantId, kind: 'credit', bucket: 'bonus', remainingMinor: { $gt: 0 },
-      $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
-    }).lean();
-    // Soonest expiry first; non-expiring bonus after expiring bonus.
-    bonusCredits.sort((a, b) => {
-      if (!a.expiresAt && !b.expiresAt) return new Date(a.createdAt) - new Date(b.createdAt);
-      if (!a.expiresAt) return 1;
-      if (!b.expiresAt) return -1;
-      return new Date(a.expiresAt) - new Date(b.expiresAt) || new Date(a.createdAt) - new Date(b.createdAt);
-    });
-    const cashCredits = await WalletLedger.find({ tenantId, kind: 'credit', bucket: 'cash', remainingMinor: { $gt: 0 } })
-      .sort({ createdAt: 1 }).lean();
-
     let left = amount;
     let cashPart = 0;
     let bonusPart = 0;
     const allocations = [];
-    for (const [bucket, credits] of [['bonus', bonusCredits], ['cash', cashCredits]]) {
+    for (const [bucket, credits] of await spendableCredits(tenantId)) {
       for (const c of credits) {
         if (left <= 0) break;
         const take = Math.min(left, Number(c.remainingMinor || 0));
@@ -194,7 +241,10 @@ export async function holdWallet({ tenantId, amountMinor, purpose = '', invoiceI
     let hold;
     let heldApplied = false;
     try {
-      hold = await WalletHold.create({ holdId, tenantId, amountMinor: amount, cashMinor: cashPart, bonusMinor: bonusPart, allocations, purpose, invoiceId, topupId });
+      hold = await WalletHold.create({
+        holdId, tenantId, amountMinor: amount, cashMinor: cashPart, bonusMinor: bonusPart, allocations, purpose, invoiceId, topupId,
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+      });
       const w = await Wallet.findOneAndUpdate(
         { tenantId },
         { $inc: { heldCashMinor: cashPart, heldBonusMinor: bonusPart } },
@@ -324,7 +374,28 @@ export async function releaseWalletHold(holdId, { reason = 'Payment failed' } = 
   });
 }
 
-export async function debitWallet({ tenantId, amountMinor, reason, invoiceId, source = 'wallet_payment' }) {
-  const hold = await holdWallet({ tenantId, amountMinor, purpose: reason, invoiceId });
+async function replayDebit(idempotencyKey, { reason, invoiceId, source }) {
+  const prior = await WalletHold.findOne({ idempotencyKey }).lean();
+  if (!prior) return null;
+  if (prior.status === 'captured') return { hold: prior, already: true, captured: true };
+  if (prior.status === 'held') return captureWalletHold(prior.holdId, { reason, invoiceId, source });
+  throw fail('This debit was already started and cannot be repeated', 409, 'idempotency_conflict');
+}
+
+export async function debitWallet({ tenantId, amountMinor, reason, invoiceId, source = 'wallet_payment', idempotencyKey }) {
+  if (idempotencyKey) {
+    const replay = await replayDebit(idempotencyKey, { reason, invoiceId, source });
+    if (replay) return replay;
+  }
+  let hold;
+  try {
+    hold = await holdWallet({ tenantId, amountMinor, purpose: reason, invoiceId, idempotencyKey });
+  } catch (e) {
+    if (e?.code === 11000 && idempotencyKey) {
+      const replay = await replayDebit(idempotencyKey, { reason, invoiceId, source });
+      if (replay) return replay;
+    }
+    throw e;
+  }
   return captureWalletHold(hold.holdId, { reason, invoiceId, source });
 }

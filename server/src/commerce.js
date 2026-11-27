@@ -50,9 +50,11 @@ const walletHoldSchema = new mongoose.Schema({
   purpose: String,
   invoiceId: String,
   topupId: String,
+  idempotencyKey: { type: String },
   capturedAt: Date,
   releasedAt: Date,
 }, { timestamps: true });
+walletHoldSchema.index({ idempotencyKey: 1 }, { unique: true, sparse: true });
 export const WalletHold = add('WalletHold', walletHoldSchema);
 
 const walletTopupSchema = new mongoose.Schema({
