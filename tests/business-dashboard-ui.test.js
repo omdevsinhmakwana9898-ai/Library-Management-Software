@@ -16,12 +16,14 @@ test('business dashboard shows the collection card and charts and moves the libr
   assert.match(dash, /verifiedAdminRefresh\(libs, sum\)/);
   assert.match(dash, /Software collection did not return/);
   const businessAt = dash.indexOf('id="sa-business-dashboard"');
-  const directoryAt = dash.indexOf('id="sa-library-directory"');
-  const insightsAt = dash.indexOf("view === 'insights' && (\n          <div style={{ display: 'flex', justifyContent: 'space-between'");
-  assert.ok(businessAt !== -1 && directoryAt !== -1 && insightsAt !== -1);
-  assert.ok(directoryAt > insightsAt);
+  const insightsAt = dash.indexOf("view === 'insights' && !insightNav && (");
+  assert.ok(businessAt !== -1 && insightsAt !== -1);
+  assert.ok(insightsAt > businessAt);
   assert.ok(!dash.slice(businessAt, insightsAt).includes('sa-library-directory'));
+  assert.ok(!dash.slice(businessAt, insightsAt).includes('LibraryDirectory'));
   assert.match(dash, /New library/);
+  assert.match(dash, /LibraryDirectory/);
+  assert.match(dash, /PlatformInsightsOverview/);
 });
 
 test('collection details separates cash, top-ups, pending, and refunds', () => {

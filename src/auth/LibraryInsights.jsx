@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Download, Lock, Filter } from 'lucide-react';
+import { Download, Lock, Filter, ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, downloadFile } from '../utils/api';
 
@@ -16,7 +16,7 @@ const Bars = ({ rows, label, value, fmt = (v) => v }) => {
   return (
     <div style={{ display: 'grid', gap: 6 }}>
       {rows.map(r => (
-        <div key={r[label]} style={{ display: 'grid', gridTemplateColumns: 'minmax(70px, 30%) 1fr auto', gap: 8, alignItems: 'center', fontSize: 12 }}>
+        <div key={`${r[label]}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(70px, 30%) 1fr auto', gap: 8, alignItems: 'center', fontSize: 12 }}>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r[label]}</span>
           <div style={{ background: 'var(--border-light, #f3f4f6)', borderRadius: 4, height: 10 }}><div style={{ width: `${((r[value] || 0) / max) * 100}%`, background: '#111827', height: 10, borderRadius: 4 }} /></div>
           <span style={{ fontWeight: 600 }}>{fmt(r[value])}</span>
@@ -27,45 +27,94 @@ const Bars = ({ rows, label, value, fmt = (v) => v }) => {
   );
 };
 
-/** Super Admin "Library Insights & Analytics": aggregated customer operations, no student PII, audited. */
-export function LibraryInsights({ libraries }) {
-  const [f, setF] = useState({ from: '', to: '', libraryId: '', city: '' });
+/** Platform Library Insights header: libraries and active students only. */
+export function PlatformInsightsOverview() {
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const qs = (o) => { const p = new URLSearchParams(); Object.entries(o).forEach(([k, v]) => v && p.set(k, v)); const s = p.toString(); return s ? `?${s}` : ''; };
-  const load = useCallback(async (filters) => {
-    setLoading(true);
-    try { setData(await api.adminInsights(qs(filters))); } catch (e) { toast.error(e.message); } finally { setLoading(false); }
+  const load = useCallback(async () => {
+    try { setData(await api.adminInsightsOverview()); } catch (e) { toast.error(e.message); }
   }, []);
-  useEffect(() => { load({}); }, [load]);
-  const cities = [...new Set(libraries.map(l => l.city).filter(Boolean))];
-  const set = (k) => (e) => setF(x => ({ ...x, [k]: e.target.value }));
+  useEffect(() => { load(); }, [load]);
   const t = data?.totals;
   return (
-    <div id="library-insights" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+    <div id="sa-insights-overview" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div className="premium-card" style={{ padding: 12, display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12, color: 'var(--text-secondary)' }}>
         <Lock size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-        <span>{data?.privacy || 'Aggregated statistics only. Access is logged.'} Customer fee collections are the libraries' own money and are kept separate from our software revenue.</span>
+        <span>{data?.note || 'Customer fee collections, expenses and seat use are on each library’s analytics. Customer money is separate from software revenue.'}</span>
+      </div>
+      {t && (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <Stat label="Libraries" value={t.libraries} sub={`${t.librariesActive} enabled`} />
+          <Stat label="Active students" value={t.studentsActive} sub={`${t.studentsTotal} enrolled`} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One library’s operational analytics. Customer fees stay in this view. */
+export function LibraryAnalytics({ libraryId, libraryName, onBack }) {
+  const [f, setF] = useState({ from: '', to: '', branchId: '', sectionId: '' });
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const qs = (o) => {
+    const p = new URLSearchParams();
+    if (libraryId) p.set('libraryId', libraryId);
+    Object.entries(o).forEach(([k, v]) => v && p.set(k, v));
+    const s = p.toString();
+    return s ? `?${s}` : '';
+  };
+  const load = useCallback(async (filters) => {
+    if (!libraryId) return;
+    setLoading(true);
+    try { setData(await api.adminInsights(qs(filters))); } catch (e) { toast.error(e.message); } finally { setLoading(false); }
+  }, [libraryId]);
+  useEffect(() => { load(f); }, [load]); // eslint-disable-line react-hooks/exhaustive-deps
+  const set = (k) => (e) => setF(x => ({ ...x, [k]: e.target.value, ...(k === 'branchId' ? { sectionId: '' } : {}) }));
+  const t = data?.totals;
+  const row = data?.perLibrary?.[0];
+  const name = row?.name || libraryName || libraryId;
+  const branches = (data?.catalog?.branches || []).filter(b => b.libraryId === libraryId);
+  const sections = (data?.catalog?.sections || []).filter(s => s.libraryId === libraryId && (!f.branchId || s.branchId === f.branchId));
+  const branchName = branches.find(b => b.branchId === (data?.filters?.branchId || f.branchId))?.name;
+  const period = `${data?.filters?.from || 'all time'} → ${data?.filters?.to || 'today'}`;
+  return (
+    <div id="sa-library-analytics" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+      <div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onBack} style={{ paddingLeft: 0 }}><ArrowLeft size={14} /> Back to library</button>
+        <h2 style={{ fontSize: 26, fontWeight: 800, margin: '8px 0 0' }}>{name} analytics</h2>
+        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
+          Library {libraryId} · period {period} · branch {branchName || data?.filters?.branchId || 'all'}{data?.filters?.sectionId ? ` · section ${data.filters.sectionId}` : ''}
+        </p>
+      </div>
+      <div className="premium-card" style={{ padding: 12, display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12, color: 'var(--text-secondary)' }}>
+        <Lock size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+        <span>{data?.privacy || 'Aggregated statistics only. Access is logged.'} Customer fee collections on this page are this library’s own money and are kept separate from software revenue.</span>
       </div>
       <form className="premium-card" onSubmit={(e) => { e.preventDefault(); load(f); }} style={{ padding: 12, display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', alignItems: 'end' }}>
         <label className="form-label" style={{ margin: 0 }}>From<input className="form-input" type="date" value={f.from} onChange={set('from')} /></label>
         <label className="form-label" style={{ margin: 0 }}>To<input className="form-input" type="date" value={f.to} onChange={set('to')} /></label>
-        <label className="form-label" style={{ margin: 0 }}>Library
-          <select className="form-input" value={f.libraryId} onChange={set('libraryId')}><option value="">All libraries</option>{libraries.map(l => <option key={l.libraryId} value={l.libraryId}>{l.name}</option>)}</select>
+        <label className="form-label" style={{ margin: 0 }}>Branch
+          <select className="form-input" value={f.branchId} onChange={set('branchId')}>
+            <option value="">All branches</option>
+            {branches.map(b => <option key={b.branchId} value={b.branchId}>{b.name}</option>)}
+          </select>
         </label>
-        <label className="form-label" style={{ margin: 0 }}>City
-          <select className="form-input" value={f.city} onChange={set('city')}><option value="">All cities</option>{cities.map(c => <option key={c} value={c}>{c}</option>)}</select>
+        <label className="form-label" style={{ margin: 0 }}>Section
+          <select className="form-input" value={f.sectionId} onChange={set('sectionId')}>
+            <option value="">All sections</option>
+            {sections.map(s => <option key={s.sectionId} value={s.sectionId}>{s.name}</option>)}
+          </select>
         </label>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn btn-primary btn-sm" type="submit" disabled={loading}><Filter size={14} /> <span>Apply</span></button>
-          <button className="btn btn-secondary btn-sm" type="button" onClick={() => downloadFile(`/admin/insights/export.csv${qs(f)}`, 'library-insights.csv').catch(e => toast.error(e.message))}><Download size={14} /> <span>CSV</span></button>
+          <button className="btn btn-secondary btn-sm" type="button" onClick={() => downloadFile(`/admin/insights/export.csv${qs(f)}`, `library-insights-${libraryId}.csv`).catch(e => toast.error(e.message))}><Download size={14} /> <span>CSV</span></button>
         </div>
       </form>
       {t && (
         <>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <Stat label="Libraries" value={t.libraries} />
-            <Stat label="Active students" value={t.studentsActive} sub={`${t.studentsTotal} total`} />
+            <Stat label="Active students" value={t.studentsActive} sub={`${t.studentsTotal} enrolled`} />
+            <Stat label="Enrollment" value={t.studentsTotal} />
             <Stat label="Seat utilization" value={t.seatUtilization == null ? '—' : `${t.seatUtilization}%`} sub={`${t.seatsOccupied} / ${t.seatsTotal} seats`} />
             <Stat label="Customer fee collections" value={inr(t.customerFeeCollections)} sub={`${t.payments} payments`} />
             <Stat label="Customer expenses" value={inr(t.customerExpenses)} />
@@ -73,25 +122,15 @@ export function LibraryInsights({ libraries }) {
           </div>
           <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
             <div className="premium-card" style={{ padding: 14, minWidth: 0 }}><strong style={{ fontSize: 14 }}>Collections by month</strong><div style={{ marginTop: 8 }}><Bars rows={data.trend} label="month" value="collections" fmt={inr} /></div></div>
-            <div className="premium-card" style={{ padding: 14, minWidth: 0 }}><strong style={{ fontSize: 14 }}>Popular plans</strong><div style={{ marginTop: 8 }}><Bars rows={data.popularPlans} label="name" value="students" /></div></div>
-            <div className="premium-card" style={{ padding: 14, minWidth: 0 }}><strong style={{ fontSize: 14 }}>Cities (active students)</strong><div style={{ marginTop: 8 }}><Bars rows={data.cities} label="city" value="studentsActive" /></div></div>
+            <div className="premium-card" style={{ padding: 14, minWidth: 0 }}><strong style={{ fontSize: 14 }}>Popular membership plans</strong><div style={{ marginTop: 8 }}><Bars rows={data.popularPlans} label="name" value="students" /></div></div>
+            <div className="premium-card" style={{ padding: 14, minWidth: 0 }}><strong style={{ fontSize: 14 }}>Branches</strong><div style={{ marginTop: 8 }}><Bars rows={(data.branches || []).map(b => ({ name: b.branchId || 'Unassigned', collections: b.collections }))} label="name" value="collections" fmt={inr} /></div></div>
           </div>
-          <div className="premium-card sa-table-card" style={{ padding: 0 }}>
-            <div className="table-container">
-              <table className="data-grid" style={{ width: '100%' }}>
-                <thead><tr><th>Library</th><th>City</th><th>Active / total students</th><th>Seats used</th><th>Fee collections</th><th>Expenses</th><th>Net</th></tr></thead>
-                <tbody>
-                  {data.perLibrary.map(r => (
-                    <tr key={r.libraryId}>
-                      <td><strong>{r.name}</strong></td><td>{r.city || '—'}</td><td>{r.studentsActive} / {r.studentsTotal}</td>
-                      <td>{r.seatsOccupied} / {r.seatsTotal}{r.seatUtilization != null && ` (${r.seatUtilization}%)`}</td>
-                      <td>{inr(r.collections)}</td><td>{inr(r.expenses)}</td><td>{inr(r.net)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {row && (
+            <div className="premium-card" style={{ padding: 14, fontSize: 14 }}>
+              <strong>{row.name}</strong>
+              <span> · {row.studentsActive} / {row.studentsTotal} students · {row.seatsOccupied} / {row.seatsTotal} seats · {inr(row.collections)} collected · {inr(row.expenses)} expenses · {inr(row.net)} net</span>
             </div>
-          </div>
+          )}
         </>
       )}
     </div>

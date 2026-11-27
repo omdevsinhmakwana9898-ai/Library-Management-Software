@@ -1,13 +1,15 @@
 import { confirmNameMatches } from '../utils/confirmName';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Building2, Eye, KeyRound, LogOut, Plus, RefreshCw, Shield, UserPlus, Power, Trash2 } from 'lucide-react';
+import { LogOut, Plus, RefreshCw, Shield, UserPlus } from 'lucide-react';
 import { AssistedPasswordReset } from './AssistedPasswordReset';
 import toast, { Toaster } from 'react-hot-toast';
 import { api } from '../utils/api';
 import { verifiedAdminRefresh } from '../utils/refreshFeedback';
 import { SUPERADMIN_REFRESH } from '../utils/refreshCopy';
 import { useAuth } from './AuthContext';
-import { LibraryInsights } from './LibraryInsights';
+import { PlatformInsightsOverview, LibraryAnalytics } from './LibraryInsights';
+import { LibraryDirectory } from './LibraryDirectory';
+import { LibraryDetails } from './LibraryDetails';
 import { CollectionDetails, inrMinor } from './CollectionDetails';
 import { PartnersAdmin } from './PartnersAdmin';
 import { SupportDesk } from './SupportDesk';
@@ -16,8 +18,6 @@ import { PaymentsAdmin } from './PaymentsAdmin';
 import { MessagingAdmin } from './MessagingAdmin';
 import { DemoRequestsAdmin } from './DemoRequestsAdmin';
 import { SaModal } from './SaModal';
-
-const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
 const KPI_TONES = {
   blue: { background: '#eff6ff', color: '#1e3a8a', accent: '#2563eb' },
@@ -65,7 +65,7 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
   const viewRef = useRef('business');
   const [collectionQuery, setCollectionQuery] = useState({ preset: 'this_month', q: '', kind: '', status: '', provider: '', from: '', to: '' });
   const collectionQueryRef = useRef(collectionQuery);
-  const [cityEdit, setCityEdit] = useState(null);
+  const [insightNav, setInsightNav] = useState(null);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ name: '', adminEmail: '', adminName: '' });
   const [createOpen, setCreateOpen] = useState(false);
@@ -86,6 +86,7 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
     try {
       await api.adminDeleteLibrary(deleteFor.libraryId, deleteName);
       toast.success(`${deleteFor.name} deleted`);
+      if (insightNav?.libraryId === deleteFor.libraryId) setInsightNav(null);
       setDeleteFor(null); setDeleteName(''); load();
     } catch (err) {
       // Shown inside the dialog: a toast can sit behind the full-screen dialog on phones.
@@ -176,12 +177,6 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
     } catch (err) { toast.error(err.message); }
   };
 
-  const toggleStatus = async (lib) => {
-    const status = lib.status === 'Active' ? 'Disabled' : 'Active';
-    if (status === 'Disabled' && !window.confirm(`Disable ${lib.name}? Its users will be locked out.`)) return;
-    try { await api.adminUpdateLibrary(lib.libraryId, { status }); load(); } catch (e) { toast.error(e.message); }
-  };
-
   const addAdmin = async (e) => {
     e.preventDefault();
     try {
@@ -210,7 +205,7 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
       <main className="sa-main" style={{ padding: 24, maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24 }}>
         <div role="tablist" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           <button role="tab" aria-selected={view === 'business'} className={`btn btn-sm ${view === 'business' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'business'; setView('business'); }}>Business dashboard</button>
-          <button role="tab" aria-selected={view === 'insights'} className={`btn btn-sm ${view === 'insights' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'insights'; setView('insights'); }}>Library Insights &amp; Analytics</button>
+          <button role="tab" aria-selected={view === 'insights'} className={`btn btn-sm ${view === 'insights' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'insights'; setView('insights'); setInsightNav(null); }}>Library Insights &amp; Analytics</button>
           <button role="tab" aria-selected={view === 'partners'} className={`btn btn-sm ${view === 'partners' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'partners'; setView('partners'); }}>Partners &amp; Commissions</button>
           <button role="tab" aria-selected={view === 'plans'} className={`btn btn-sm ${view === 'plans' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'plans'; setView('plans'); }}>Software plans</button>
           <button role="tab" aria-selected={view === 'payments'} className={`btn btn-sm ${view === 'payments' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { viewRef.current = 'payments'; setView('payments'); }}>Payments</button>
@@ -278,54 +273,29 @@ export function SuperAdminDashboard({ onOpenLibrary }) {
           </div>
         )}
 
-        {view === 'insights' && (
+        {view === 'insights' && !insightNav && (
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Library directory</h2>
             <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}><Plus size={14} /> New library</button>
           </div>
         )}
-        {view === 'insights' && (
-        <div id="sa-library-directory" className="premium-card sa-table-card" style={{ padding: 0 }}>
-          <div className="table-container">
-            <table className="data-grid" style={{ width: '100%' }}>
-              <thead>
-                <tr><th>Owner</th><th>Library</th><th>Subscription</th><th>Expiry</th><th>Payment</th><th>Partner</th><th>Status</th><th>Last active</th><th>Actions</th></tr>
-              </thead>
-              <tbody>
-                {loading && <tr><td colSpan={9}>Loading…</td></tr>}
-                {!loading && libraries.length === 0 && <tr><td colSpan={9}>No client libraries yet.</td></tr>}
-                {libraries.map(l => (
-                  <tr key={l.libraryId}>
-                    <td style={{ fontSize: 12 }}>{l.owner ? <><strong>{l.owner.name || l.owner.email}</strong><div style={{ color: 'var(--text-tertiary)' }}>{l.owner.email}</div></> : (l.admins.map(a => a.email).join(', ') || '—')}</td>
-                    <td><strong>{l.name}</strong><div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{l.libraryId}{' • '}
-                      {cityEdit?.id === l.libraryId
-                        ? <input className="form-input" autoFocus style={{ display: 'inline-block', width: 110, padding: '2px 6px', fontSize: 11 }} value={cityEdit.v} onChange={e => setCityEdit({ id: l.libraryId, v: e.target.value })}
-                            onBlur={async () => { try { await api.adminUpdateLibrary(l.libraryId, { city: cityEdit.v }); } catch (e) { toast.error(e.message); } setCityEdit(null); load(); }}
-                            onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()} />
-                        : <button type="button" className="btn btn-ghost btn-sm" style={{ padding: 0, fontSize: 11, minHeight: 0 }} onClick={() => setCityEdit({ id: l.libraryId, v: l.city || '' })}>{l.city || 'add city'}</button>}
-                    </div></td>
-                    <td>{l.subscription || '—'}</td>
-                    <td>{l.expiry ? fmtDate(l.expiry) : '—'}</td>
-                    <td>{l.paymentStatus || '—'}</td>
-                    <td style={{ fontSize: 12 }}>{l.partner?.name || '—'}</td>
-                    <td><span className={`badge ${l.status === 'Active' ? 'badge-active' : 'badge-expired'}`}>{l.status}</span>{l.deletionRequested && <div style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }} title={l.deletionRequest?.reason || ''}>Deletion requested</div>}</td>
-                    <td style={{ fontSize: 12 }}>{fmtDate(l.lastActiveAt)}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}>
-                      <button className="btn btn-ghost btn-sm" title="View read-only" onClick={() => onOpenLibrary(l, true)}><Eye size={14} /></button>
-                      <button className="btn btn-secondary btn-sm" title="Access Library" onClick={() => onOpenLibrary(l, false)}><Building2 size={14} /> <span>Access Library</span></button>
-                      <button className="btn btn-ghost btn-sm" title="Add client admin" onClick={() => setInviteFor(l)}><UserPlus size={14} /></button>
-                      <button className="btn btn-ghost btn-sm" title="Reset owner or staff password" onClick={() => setResetFor(l)}><KeyRound size={14} /></button>
-                      <button className="btn btn-ghost btn-sm" title={l.status === 'Active' ? 'Disable' : 'Enable'} onClick={() => toggleStatus(l)}><Power size={14} /></button>
-                      <button className="btn btn-ghost btn-sm" title="Delete library" aria-label={`Delete ${l.name}`} style={{ color: '#dc2626' }} onClick={() => { setDeleteFor(l); setDeleteName(''); setDeleteError(''); }}><Trash2 size={14} /></button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        {view === 'insights' && !insightNav && <PlatformInsightsOverview />}
+        {view === 'insights' && !insightNav && <LibraryDirectory onOpen={(libraryId) => setInsightNav({ page: 'details', libraryId })} />}
+        {view === 'insights' && insightNav?.page === 'details' && (
+          <LibraryDetails
+            libraryId={insightNav.libraryId}
+            onBack={() => setInsightNav(null)}
+            onOpenLibrary={onOpenLibrary}
+            onInvite={(lib) => { setInviteEmail(''); setInviteFor(lib); }}
+            onReset={setResetFor}
+            onDelete={(lib) => { setDeleteFor(lib); setDeleteName(''); setDeleteError(''); }}
+            onAnalytics={(lib) => setInsightNav({ page: 'analytics', libraryId: lib.libraryId, name: lib.name })}
+            onChanged={load}
+          />
         )}
-        {view === 'insights' && <LibraryInsights libraries={libraries} />}
+        {view === 'insights' && insightNav?.page === 'analytics' && (
+          <LibraryAnalytics key={insightNav.libraryId} libraryId={insightNav.libraryId} libraryName={insightNav.name} onBack={() => setInsightNav({ page: 'details', libraryId: insightNav.libraryId })} />
+        )}
 
         {deleteFor && (
           <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Delete library" onClick={() => !deleting && setDeleteFor(null)}>
