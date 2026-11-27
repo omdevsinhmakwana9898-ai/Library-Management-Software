@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../utils/api';
 import { FiltersMenu } from './FiltersMenu';
+import { SaEmpty, SaList, SaListRow, SaPage, SaPageHeader, SaStatusBadge } from './saPage';
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 const fmtStamp = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
@@ -64,9 +65,20 @@ export function LibraryDirectory({ onOpen }) {
   const from = total ? (data.page - 1) * data.pageSize + 1 : 0;
   const to = total ? Math.min(total, data.page * data.pageSize) : 0;
 
+  const subscriptionTone = (label) => {
+    const text = String(label || '').toLowerCase();
+    if (text.includes('expir') && !text.includes('expired')) return 'expiring';
+    if (text.includes('expired')) return 'expired';
+    if (text.includes('trial')) return 'trial';
+    if (text.includes('cancel')) return 'cancelled';
+    if (text.includes('active')) return 'active';
+    return '';
+  };
+
   return (
-    <div id="sa-library-directory" className="premium-card sa-table-card" style={{ padding: 0 }}>
-      <div style={{ padding: 12 }}>
+    <SaPage id="sa-library-directory">
+      <SaPageHeader title="Library directory" subtitle="Search a library, then open it for the plan, status, and analytics." />
+      <div>
         <FiltersMenu
           buttonId="sa-library-filters-button"
           menuId="sa-library-filters-menu"
@@ -130,50 +142,46 @@ export function LibraryDirectory({ onOpen }) {
           </label>
         </FiltersMenu>
       </div>
-      <div className="table-container">
-        <table className="data-grid" style={{ width: '100%', minWidth: 980 }}>
-          <thead>
-            <tr>
-              {[
-                ['name', 'Library Name'],
-                ['city', 'City'],
-                ['owner', 'Owner'],
-                ['plan', 'Current Software Plan'],
-                ['expiry', 'Expiry'],
-                ['subscription', 'Subscription Status'],
-                ['account', 'Account Status'],
-                ['students', 'Active/Total Students'],
-                ['lastActive', 'Last Activity'],
-              ].map(([key, label]) => (
-                <th key={key} aria-sort={query.sort === key ? (query.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                  <button type="button" className="btn btn-ghost btn-sm" style={{ padding: 0, minHeight: 0, fontWeight: 700 }} onClick={() => sortBy(key)}>{label}{arrow(key)}</button>
-                </th>
-              ))}
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && <tr><td colSpan={10}>Loading…</td></tr>}
-            {!loading && items.length === 0 && <tr><td colSpan={10}>No libraries match these filters.</td></tr>}
-            {items.map(l => (
-              <tr key={l.libraryId} onClick={() => onOpen(l.libraryId)} style={{ cursor: 'pointer' }}>
-                <td><strong>{l.name}</strong><div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{l.libraryId}</div></td>
-                <td>{l.city || '—'}</td>
-                <td style={{ fontSize: 12 }}>{l.owner ? <><strong>{l.owner.name || l.owner.email}</strong><div style={{ color: 'var(--text-tertiary)' }}>{l.owner.email}</div></> : '—'}</td>
-                <td>{l.planName || '—'}{l.trial ? ' · Trial' : ''}</td>
-                <td>{fmtDate(l.expiry)}</td>
-                <td>{l.subscriptionLabel}</td>
-                <td><span className={`badge ${l.accountStatus === 'Enabled' ? 'badge-active' : 'badge-expired'}`}>{l.accountStatus}</span>{l.deletionRequested && <div style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }}>Deletion requested</div>}</td>
-                <td>{l.studentsActive} / {l.studentsTotal}</td>
-                <td style={{ fontSize: 12 }}>{fmtStamp(l.lastActiveAt)}</td>
-                <td>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={(e) => { e.stopPropagation(); onOpen(l.libraryId); }}>Details</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="sa-sort-bar" role="group" aria-label="Sort libraries">
+        {[
+          ['name', 'Library Name'],
+          ['city', 'City'],
+          ['owner', 'Owner'],
+          ['plan', 'Current Software Plan'],
+          ['expiry', 'Expiry'],
+          ['subscription', 'Subscription Status'],
+          ['account', 'Account Status'],
+          ['students', 'Active/Total Students'],
+          ['lastActive', 'Last Activity'],
+        ].map(([key, label]) => (
+          <button key={key} type="button" className={`btn btn-sm ${query.sort === key ? 'btn-secondary' : 'btn-ghost'}`} aria-sort={query.sort === key ? (query.dir === 'asc' ? 'ascending' : 'descending') : 'none'} onClick={() => sortBy(key)}>{label}{arrow(key)}</button>
+        ))}
       </div>
+      {loading && <p style={{ margin: 0, fontSize: 14, color: 'var(--text-secondary)' }}>Loading…</p>}
+      {!loading && items.length === 0 && (
+        <SaEmpty title="No libraries match these filters">
+          Clear a filter or try a different name, city, or owner.
+        </SaEmpty>
+      )}
+      {items.length > 0 && (
+        <SaList>
+          {items.map(l => (
+            <SaListRow
+              key={l.libraryId}
+              title={l.name}
+              meta={[l.city || 'City not set', l.owner?.name || l.owner?.email || 'No owner'].join(' · ')}
+              extra={`${l.planName || 'No plan'}${l.trial ? ' · Trial' : ''} · Expires ${fmtDate(l.expiry)} · ${l.studentsActive} / ${l.studentsTotal} students · Last activity ${fmtStamp(l.lastActiveAt)}${l.deletionRequested ? ' · Deletion requested' : ''}`}
+              onClick={() => onOpen(l.libraryId)}
+              badge={(
+                <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  {l.subscriptionLabel ? <SaStatusBadge status={subscriptionTone(l.subscriptionLabel)}>{l.subscriptionLabel}</SaStatusBadge> : null}
+                  <SaStatusBadge status={l.accountStatus} />
+                </span>
+              )}
+            />
+          ))}
+        </SaList>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', padding: 12, flexWrap: 'wrap', fontSize: 13 }}>
         <span>{total ? `Showing ${from}–${to} of ${total}` : '0 libraries'}</span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -187,6 +195,6 @@ export function LibraryDirectory({ onOpen }) {
           <button type="button" className="btn btn-secondary btn-sm" disabled={!data || data.page >= data.pages} onClick={() => set({ page: query.page + 1 }, false)}>Next</button>
         </div>
       </div>
-    </div>
+    </SaPage>
   );
 }

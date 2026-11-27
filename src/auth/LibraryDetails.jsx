@@ -1,17 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Building2, Eye, KeyRound, Power, Trash2, UserPlus, BarChart3, ArrowLeft } from 'lucide-react';
+import { Building2, Eye, KeyRound, Power, Trash2, UserPlus, BarChart3 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../utils/api';
+import { SaEmpty, SaFact, SaFactList, SaPage, SaPageHeader, SaStatusBadge, SaSummaryCard, SaSummaryGrid } from './saPage';
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 const fmtStamp = (d) => (d ? new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Never');
-
-const Field = ({ label, children }) => (
-  <div style={{ minWidth: 0 }}>
-    <div style={{ fontSize: 12, color: 'var(--text-tertiary)', fontWeight: 600 }}>{label}</div>
-    <div style={{ fontSize: 15, marginTop: 2, overflowWrap: 'anywhere' }}>{children}</div>
-  </div>
-);
 
 export function LibraryDetails({ libraryId, onBack, onOpenLibrary, onInvite, onReset, onDelete, onAnalytics, onChanged }) {
   const [library, setLibrary] = useState(null);
@@ -66,68 +60,57 @@ export function LibraryDetails({ libraryId, onBack, onOpenLibrary, onInvite, onR
     finally { setSavingStatus(false); }
   };
 
-  if (loading) return <div id="sa-library-details" className="premium-card" style={{ padding: 20 }}>Loading library…</div>;
+  if (loading) return <SaPage id="sa-library-details"><p style={{ margin: 0 }}>Loading library…</p></SaPage>;
   if (!library) {
     return (
-      <div id="sa-library-details" className="premium-card" style={{ padding: 20 }}>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={onBack}><ArrowLeft size={14} /> Back to directory</button>
-        <p style={{ marginTop: 12 }}>This library is not available.</p>
-      </div>
+      <SaPage id="sa-library-details">
+        <SaPageHeader onBack={onBack} backLabel="Library directory" title="Library" subtitle="This record could not be opened." />
+        <SaEmpty title="This library is not available">
+          Go back to the directory and choose another library.
+        </SaEmpty>
+      </SaPage>
     );
   }
 
   const disabling = library.status === 'Active';
 
   return (
-    <div id="sa-library-details" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        <div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onBack} style={{ paddingLeft: 0 }}><ArrowLeft size={14} /> Back to directory</button>
-          <h2 style={{ fontSize: 32, fontWeight: 800, letterSpacing: '-0.03em', margin: '8px 0 4px' }}>{library.name}</h2>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>{library.city || 'City not set'}</span>
-            <span className={`badge ${library.accountStatus === 'Enabled' ? 'badge-active' : 'badge-expired'}`}>{library.accountStatus}</span>
-          </div>
-        </div>
-        <button type="button" className="btn btn-primary" onClick={() => onAnalytics(library)}><BarChart3 size={16} /> Library analytics</button>
-      </div>
+    <SaPage id="sa-library-details">
+      <SaPageHeader
+        onBack={onBack}
+        backLabel="Library directory"
+        title={library.name}
+        subtitle={library.city || 'City not set'}
+        actions={<button type="button" className="btn btn-primary" onClick={() => onAnalytics(library)}><BarChart3 size={16} /> Library analytics</button>}
+      />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-        <div className="premium-card" style={{ padding: '22px 24px', background: '#eff6ff', borderColor: 'transparent' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#1e3a8a' }}>Software Plan</div>
-          <div style={{ fontSize: 32, fontWeight: 800, marginTop: 6, color: '#1d4ed8' }}>{library.planName || 'No plan'}</div>
-          {library.trial && <div style={{ marginTop: 8 }}><span className="badge badge-active">Trial</span></div>}
-        </div>
-        <div className="premium-card" style={{ padding: '22px 24px', background: '#fffbeb', borderColor: 'transparent' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#78350f' }}>Plan Expiry</div>
-          <div style={{ fontSize: 32, fontWeight: 800, marginTop: 6, color: '#b45309' }}>{fmtDate(library.expiry)}</div>
-        </div>
-      </div>
+      <SaSummaryGrid>
+        <SaSummaryCard label="Software Plan" value={library.planName || 'No plan'} sub={library.trial ? <SaStatusBadge status="trial">Trial</SaStatusBadge> : 'Current software plan'} tone="#eff6ff" />
+        <SaSummaryCard label="Plan Expiry" value={fmtDate(library.expiry)} sub={library.subscriptionLabel || 'Subscription status'} tone="#fffbeb" />
+        <SaSummaryCard label="Account Status" value={<SaStatusBadge status={library.accountStatus} />} sub={library.subscriptionLabel || '—'} />
+      </SaSummaryGrid>
 
-      <div className="premium-card" style={{ padding: 18 }}>
-        <strong style={{ fontSize: 16 }}>Library information</strong>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginTop: 14 }}>
-          <Field label="Owner Name">{library.owner?.name || '—'}</Field>
-          <Field label="City">
-            <form onSubmit={saveCity} style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
-              <input className="form-input" aria-label="City" value={city} onChange={e => setCity(e.target.value)} style={{ maxWidth: 180 }} />
-              <button className="btn btn-secondary btn-sm" type="submit" disabled={savingCity}>{savingCity ? 'Saving…' : 'Save'}</button>
-            </form>
-          </Field>
-          <Field label="Mobile">{library.mobile || '—'}</Field>
-          <Field label="Email">{library.email || '—'}</Field>
-          <Field label="Assigned Partner">{library.assignedPartner || '—'}</Field>
-          <Field label="Account Status">{library.accountStatus}</Field>
-          <Field label="Subscription Status">{library.planName ? `${library.planName} · ` : ''}{library.subscriptionLabel}</Field>
-          <Field label="Plan Expiry">{fmtDate(library.expiry)}</Field>
-          <Field label="Last Active">{fmtStamp(library.lastActiveAt)}</Field>
-        </div>
-      </div>
+      <SaFactList>
+        <SaFact label="Owner Name">{library.owner?.name || '—'}</SaFact>
+        <SaFact label="City">
+          <form onSubmit={saveCity} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: 4 }}>
+            <input className="form-input" aria-label="City" value={city} onChange={e => setCity(e.target.value)} style={{ maxWidth: 220, minWidth: 0, flex: '1 1 140px' }} />
+            <button className="btn btn-secondary btn-sm" type="submit" disabled={savingCity}>{savingCity ? 'Saving…' : 'Save'}</button>
+          </form>
+        </SaFact>
+        <SaFact label="Mobile">{library.mobile || '—'}</SaFact>
+        <SaFact label="Email">{library.email || '—'}</SaFact>
+        <SaFact label="Assigned Partner">{library.assignedPartner || '—'}</SaFact>
+        <SaFact label="Account Status"><SaStatusBadge status={library.accountStatus} /></SaFact>
+        <SaFact label="Subscription Status">{library.planName ? `${library.planName} · ` : ''}{library.subscriptionLabel}</SaFact>
+        <SaFact label="Plan Expiry">{fmtDate(library.expiry)}</SaFact>
+        <SaFact label="Last Active">{fmtStamp(library.lastActiveAt)}</SaFact>
+      </SaFactList>
 
       <div className="premium-card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <strong style={{ fontSize: 16 }}>Library actions</strong>
         <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>These actions apply only to {library.name}. View Only opens the owner workspace without saving changes. Access Library opens the same workspace with write access.</p>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="sa-action-row">
           <button type="button" className="btn btn-secondary" onClick={() => onOpenLibrary(library, true)}><Eye size={16} /> View Only</button>
           <button type="button" className="btn btn-primary" onClick={() => onOpenLibrary(library, false)}><Building2 size={16} /> Access Library</button>
           <button type="button" className="btn btn-secondary" onClick={() => onInvite(library)}><UserPlus size={16} /> Manage Staff</button>
@@ -139,7 +122,7 @@ export function LibraryDetails({ libraryId, onBack, onOpenLibrary, onInvite, onR
       <div className="premium-card" style={{ padding: 18, border: '1px solid #fecaca', background: '#fff1f2' }}>
         <h3 style={{ margin: '0 0 6px', fontSize: 22, color: '#991b1b' }}>Delete Library</h3>
         <p style={{ margin: '0 0 12px', fontSize: 14, color: '#7f1d1d', maxWidth: 640 }}>Permanently deletes {library.name} and its students, payments, settings and staff accounts. This cannot be undone. Other libraries are not affected. To only block sign-in, use Disable library.</p>
-        <button type="button" className="btn" style={{ background: '#dc2626', color: '#fff', fontWeight: 800, fontSize: 16, padding: '12px 18px' }} onClick={() => onDelete(library)}><Trash2 size={18} /> Delete Library</button>
+        <button type="button" className="btn btn-danger" onClick={() => onDelete(library)}><Trash2 size={18} /> Delete Library</button>
       </div>
 
       {statusOpen && (
@@ -158,6 +141,6 @@ export function LibraryDetails({ libraryId, onBack, onOpenLibrary, onInvite, onR
           </form>
         </div>
       )}
-    </div>
+    </SaPage>
   );
 }

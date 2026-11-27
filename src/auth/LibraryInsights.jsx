@@ -1,29 +1,23 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Download, Lock, ArrowLeft } from 'lucide-react';
+import { Download, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, downloadFile } from '../utils/api';
 import { DatePeriodSelect, FiltersMenu, datePeriodLabel, resolveDatePeriod } from './FiltersMenu';
+import { SaEmpty, SaPage, SaPageHeader, SaSummaryCard, SaSummaryGrid } from './saPage';
 
 const inr = (n) => `₹${Math.round(Number(n || 0)).toLocaleString('en-IN')}`;
-const Stat = ({ label, value, sub }) => (
-  <div className="premium-card" style={{ padding: 14, minWidth: 140, flex: '1 1 140px' }}>
-    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{label}</div>
-    <div style={{ fontSize: 20, fontWeight: 700, overflowWrap: 'anywhere' }}>{value}</div>
-    {sub && <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{sub}</div>}
-  </div>
-);
 const Bars = ({ rows, label, value, fmt = (v) => v }) => {
   const max = Math.max(1, ...rows.map(r => r[value] || 0));
   return (
     <div style={{ display: 'grid', gap: 6 }}>
       {rows.map(r => (
-        <div key={`${r[label]}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(70px, 30%) 1fr auto', gap: 8, alignItems: 'center', fontSize: 12 }}>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r[label]}</span>
+        <div key={`${r[label]}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 34%) minmax(0, 1fr) auto', gap: 8, alignItems: 'center', fontSize: 13, minWidth: 0 }}>
+          <span style={{ overflowWrap: 'anywhere' }}>{r[label]}</span>
           <div style={{ background: 'var(--border-light, #f3f4f6)', borderRadius: 4, height: 10 }}><div style={{ width: `${((r[value] || 0) / max) * 100}%`, background: '#111827', height: 10, borderRadius: 4 }} /></div>
           <span style={{ fontWeight: 600 }}>{fmt(r[value])}</span>
         </div>
       ))}
-      {rows.length === 0 && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>No data for these filters.</span>}
+      {rows.length === 0 && <SaEmpty title="No data for these filters">Widen the period or choose all branches and sections.</SaEmpty>}
     </div>
   );
 };
@@ -37,18 +31,19 @@ export function PlatformInsightsOverview() {
   useEffect(() => { load(); }, [load]);
   const t = data?.totals;
   return (
-    <div id="sa-insights-overview" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div className="premium-card" style={{ padding: 12, display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12, color: 'var(--text-secondary)' }}>
-        <Lock size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+    <SaPage id="sa-insights-overview">
+      <SaPageHeader title="Library insights" subtitle="Libraries and active students. Each library’s own fees stay on its analytics page." />
+      <div className="premium-card sa-note">
+        <Lock size={16} />
         <span>{data?.note || 'Customer fee collections, expenses and seat use are on each library’s analytics. Customer money is separate from software revenue.'}</span>
       </div>
       {t && (
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <Stat label="Libraries" value={t.libraries} sub={`${t.librariesActive} enabled`} />
-          <Stat label="Active students" value={t.studentsActive} sub={`${t.studentsTotal} enrolled`} />
-        </div>
+        <SaSummaryGrid>
+          <SaSummaryCard label="Libraries" value={t.libraries} sub={`${t.librariesActive} enabled`} />
+          <SaSummaryCard label="Active students" value={t.studentsActive} sub={`${t.studentsTotal} enrolled`} />
+        </SaSummaryGrid>
       )}
-    </div>
+    </SaPage>
   );
 }
 
@@ -104,19 +99,19 @@ export function LibraryAnalytics({ libraryId, libraryName, onBack }) {
   ].filter(Boolean);
   const period = `${data?.filters?.from || 'all time'} → ${data?.filters?.to || 'today'}`;
   return (
-    <div id="sa-library-analytics" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-      <div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onBack} style={{ paddingLeft: 0 }}><ArrowLeft size={14} /> Back to library</button>
-        <h2 style={{ fontSize: 26, fontWeight: 800, margin: '8px 0 0' }}>{name} analytics</h2>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
-          Library {libraryId} · period {period} · branch {branchName || data?.filters?.branchId || 'all'}{data?.filters?.sectionId ? ` · section ${data.filters.sectionId}` : ''}
-        </p>
+    <SaPage id="sa-library-analytics">
+      <SaPageHeader
+        onBack={onBack}
+        backLabel="Library details"
+        title={`${name} analytics`}
+        subtitle="Students, seats, and this library’s own fees for the selected period."
+        actions={<button className="btn btn-secondary btn-sm" type="button" onClick={() => downloadFile(`/admin/insights/export.csv${qs(applied)}`, `library-insights-${libraryId}.csv`).catch(e => toast.error(e.message))}><Download size={14} /> <span>CSV</span></button>}
+      />
+      <div className="premium-card sa-note">
+        <Lock size={16} />
+        <span>{data?.privacy || 'Aggregated statistics only. Access is logged.'} Customer fee collections on this page are this library’s own money and are kept separate from software revenue. Period {period}. Branch {branchName || data?.filters?.branchId || 'all'}{data?.filters?.sectionId ? `. Section ${sectionName || data.filters.sectionId}` : ''}.</span>
       </div>
-      <div className="premium-card" style={{ padding: 12, display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12, color: 'var(--text-secondary)' }}>
-        <Lock size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-        <span>{data?.privacy || 'Aggregated statistics only. Access is logged.'} Customer fee collections on this page are this library’s own money and are kept separate from software revenue.</span>
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
         <div style={{ flex: '1 1 240px', minWidth: 0 }}>
           <FiltersMenu
             buttonId="sa-analytics-filters-button"
@@ -150,18 +145,19 @@ export function LibraryAnalytics({ libraryId, libraryName, onBack }) {
             </label>
           </FiltersMenu>
         </div>
-        <button className="btn btn-secondary btn-sm" type="button" onClick={() => downloadFile(`/admin/insights/export.csv${qs(applied)}`, `library-insights-${libraryId}.csv`).catch(e => toast.error(e.message))}><Download size={14} /> <span>CSV</span></button>
       </div>
+      {loading && !t && <p style={{ margin: 0, fontSize: 14, color: 'var(--text-secondary)' }}>Loading analytics…</p>}
+      {!loading && !t && <SaEmpty title="Analytics are not available yet">Open this page again, or pick another period in Filters.</SaEmpty>}
       {t && (
         <>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <Stat label="Active students" value={t.studentsActive} sub={`${t.studentsTotal} enrolled`} />
-            <Stat label="Enrollment" value={t.studentsTotal} />
-            <Stat label="Seat utilization" value={t.seatUtilization == null ? '—' : `${t.seatUtilization}%`} sub={`${t.seatsOccupied} / ${t.seatsTotal} seats`} />
-            <Stat label="Customer fee collections" value={inr(t.customerFeeCollections)} sub={`${t.payments} payments`} />
-            <Stat label="Customer expenses" value={inr(t.customerExpenses)} />
-            <Stat label="Customer net" value={inr(t.customerNet)} />
-          </div>
+          <SaSummaryGrid>
+            <SaSummaryCard label="Active students" value={t.studentsActive} sub={`${t.studentsTotal} enrolled`} />
+            <SaSummaryCard label="Enrollment" value={t.studentsTotal} />
+            <SaSummaryCard label="Seat utilization" value={t.seatUtilization == null ? '—' : `${t.seatUtilization}%`} sub={`${t.seatsOccupied} / ${t.seatsTotal} seats`} />
+            <SaSummaryCard label="Customer fee collections" value={inr(t.customerFeeCollections)} sub={`${t.payments} payments`} />
+            <SaSummaryCard label="Customer expenses" value={inr(t.customerExpenses)} />
+            <SaSummaryCard label="Customer net" value={inr(t.customerNet)} />
+          </SaSummaryGrid>
           <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
             <div className="premium-card" style={{ padding: 14, minWidth: 0 }}><strong style={{ fontSize: 14 }}>Collections by month</strong><div style={{ marginTop: 8 }}><Bars rows={data.trend} label="month" value="collections" fmt={inr} /></div></div>
             <div className="premium-card" style={{ padding: 14, minWidth: 0 }}><strong style={{ fontSize: 14 }}>Popular membership plans</strong><div style={{ marginTop: 8 }}><Bars rows={data.popularPlans} label="name" value="students" /></div></div>
@@ -175,6 +171,6 @@ export function LibraryAnalytics({ libraryId, libraryName, onBack }) {
           )}
         </>
       )}
-    </div>
+    </SaPage>
   );
 }
