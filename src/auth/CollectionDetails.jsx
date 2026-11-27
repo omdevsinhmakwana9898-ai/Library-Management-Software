@@ -5,11 +5,16 @@ import { DatePeriodSelect, FiltersMenu, datePeriodLabel } from './FiltersMenu';
 import {
   SaEmpty,
   SaFact,
-  SaFactList,
+  SaHelper,
   SaList,
   SaListRow,
+  SaMoreInfo,
   SaPage,
   SaPageHeader,
+  SaRecordActions,
+  SaRecordHero,
+  SaRecordSection,
+  SaRecordTimeline,
   SaStatusBadge,
   SaSummaryCard,
   SaSummaryGrid,
@@ -57,43 +62,59 @@ const bucketLabel = (bucket) => (
 
 function CollectionRecordPage({ row, detail, onBack }) {
   const shown = detail || row;
+  const delivery = statusLabel(shown.receiptDeliveryStatus);
   return (
     <SaPage id="sa-collection-record">
       <SaPageHeader
         onBack={onBack}
         backLabel="Collection details"
         title={shown.libraryName || 'Transaction'}
-        subtitle="Receipt, provider, and how this payment was counted."
       />
       {!detail && <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0 }}>Loading this record…</p>}
-      <SaSummaryGrid>
-        <SaSummaryCard label="Counted as software collection" value={inrMinor(shown.collectedMinor)} tone="#ecfdf5" />
-        <SaSummaryCard label="Total" value={inrMinor(shown.totalMinor)} sub={shown.projected ? shown.projectedLabel : null} />
-        <SaSummaryCard label="Status" value={<SaStatusBadge status={shown.status} />} sub={shown.projected ? 'Scheduled for a later month' : null} />
-      </SaSummaryGrid>
-      <SaFactList>
-        <SaFact label="Invoice">{shown.invoiceId || '—'}</SaFact>
+      <SaRecordHero
+        name={shown.libraryName || 'Transaction'}
+        amount={inrMinor(shown.totalMinor)}
+        status={shown.status}
+      />
+      <SaRecordTimeline steps={[
+        { label: 'Created', at: shown.createdAt ? fmtDate(shown.createdAt) : null },
+        { label: 'Due', at: shown.dueAt ? fmtDate(shown.dueAt) : null },
+        { label: 'Paid', at: shown.paidAt ? fmtDate(shown.paidAt) : null },
+      ]} />
+      <SaRecordSection title="Payment">
+        <SaFact label="Counted as software collection">{inrMinor(shown.collectedMinor)}</SaFact>
+        <SaFact label="Total">{inrMinor(shown.totalMinor)}</SaFact>
+        <SaFact label="From wallet">{inrMinor(shown.walletMinor)}</SaFact>
+        <SaFact label="Paid online">{inrMinor(shown.gatewayMinor)}</SaFact>
+        <SaFact label="Payment method">{providerLabel(shown.provider)}</SaFact>
         <SaFact label="Receipt number">{shown.receiptNo || '—'}</SaFact>
-        <SaFact label="Receipt">{shown.receiptUrl || 'No receipt yet'}</SaFact>
-        <SaFact label="Provider">{providerLabel(shown.provider)}</SaFact>
+        <SaFact label="Receipt">{shown.receiptUrl ? 'Ready to download' : 'No receipt yet'}</SaFact>
+        <SaFact label="Verified">{statusLabel(shown.verificationState)}</SaFact>
+        <SaFact label="Receipt sent">{delivery === '—' ? 'Not recorded' : delivery}</SaFact>
+      </SaRecordSection>
+      <SaRecordSection title="Library">
+        <SaFact label="Library">{shown.libraryName || '—'}</SaFact>
+        <SaFact label="Owner">{shown.ownerName || '—'}</SaFact>
+        <SaFact label="Email">{shown.ownerEmail || '—'}</SaFact>
+      </SaRecordSection>
+      <SaMoreInfo>
+        <SaFact label="Invoice">{shown.invoiceId || '—'}</SaFact>
+        {shown.topupId ? <SaFact label="Top-up">{shown.topupId}</SaFact> : null}
+        {shown.libraryId ? <SaFact label="Library id">{shown.libraryId}</SaFact> : null}
         <SaFact label="Provider reference">{shown.providerRef || '—'}</SaFact>
         <SaFact label="Provider payment">{shown.providerPaymentRef || '—'}</SaFact>
         <SaFact label="Provider order">{shown.providerOrderRef || '—'}</SaFact>
-        <SaFact label="Verification">{statusLabel(shown.verificationState)}</SaFact>
-        <SaFact label="Receipt delivery">{statusLabel(shown.receiptDeliveryStatus) === '—' ? 'Not recorded' : statusLabel(shown.receiptDeliveryStatus)}</SaFact>
-        <SaFact label="Wallet amount">{inrMinor(shown.walletMinor)}</SaFact>
-        <SaFact label="Gateway cash">{inrMinor(shown.gatewayMinor)}</SaFact>
-        <SaFact label="Library">{shown.libraryName || '—'}</SaFact>
-        <SaFact label="Owner">{[shown.ownerName, shown.ownerEmail].filter(Boolean).join(' · ') || '—'}</SaFact>
-        <SaFact label="Paid">{fmtDate(shown.paidAt)}</SaFact>
-        <SaFact label="Created">{fmtDate(shown.createdAt)}</SaFact>
-        <SaFact label="Due">{fmtDate(shown.dueAt)}</SaFact>
-      </SaFactList>
-      {shown.receiptPath && (
-        <div>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => api.downloadFile(shown.receiptPath, `receipt-${shown.receiptNo || shown.invoiceId}.pdf`).catch(e => toast.error(e.message))}>Download receipt</button>
-        </div>
-      )}
+      </SaMoreInfo>
+      <SaHelper>
+        {shown.projected
+          ? 'This payment is scheduled for a later month and is not collected cash yet.'
+          : 'Software collection is the verified cash. Wallet amounts are listed separately.'}
+      </SaHelper>
+      <SaRecordActions>
+        {shown.receiptPath && (
+          <button type="button" className="btn btn-secondary" onClick={() => api.downloadFile(shown.receiptPath, `receipt-${shown.receiptNo || shown.invoiceId}.pdf`).catch(e => toast.error(e.message))}>Download receipt</button>
+        )}
+      </SaRecordActions>
     </SaPage>
   );
 }

@@ -59,6 +59,15 @@ test('collection details separates cash, top-ups, pending, and refunds', () => {
   assert.match(details, /Download receipt/);
   assert.match(details, /Totals follow the date range/);
   assert.match(details, /id="sa-collection-record"/);
+  assert.match(details, /SaRecordHero/);
+  assert.match(details, /SaRecordTimeline/);
+  assert.match(details, /SaRecordSection title="Payment"/);
+  assert.match(details, /SaRecordSection title="Library"/);
+  assert.match(details, /SaMoreInfo/);
+  assert.match(details, /Paid online/);
+  assert.match(details, /label: 'Created'/);
+  assert.match(details, /label: 'Due'/);
+  assert.match(details, /label: 'Paid'/);
   assert.match(details, /Collection details/);
   assert.doesNotMatch(details, /SaModal/);
   assert.match(details, /if \(record\)/);

@@ -9,6 +9,7 @@ const humanize = (value) => String(value || '')
 
 /** Friendly status copy. Raw invoice enums stay out of the Super Admin UI. */
 export const STATUS_PRESENTATION = {
+  verified_paid: { label: 'Verified', badge: 'badge-paid' },
   paid: { label: 'Paid', badge: 'badge-paid' },
   open: { label: 'Open', badge: 'badge-open' },
   pending: { label: 'Pending', badge: 'badge-pending' },
@@ -136,4 +137,71 @@ export function SaFact({ label, children }) {
       <div className="sa-fact-value">{children ?? '—'}</div>
     </div>
   );
+}
+
+/** Name, amount when the record has one, and a status badge. */
+export function SaRecordHero({ name, amount, status, badge }) {
+  return (
+    <div className="premium-card sa-record-hero">
+      <div className="sa-record-hero-main">
+        <h3 className="sa-record-hero-name">{name || '—'}</h3>
+        {amount != null && amount !== '' ? <div className="sa-record-hero-amount">{amount}</div> : null}
+      </div>
+      {(badge || (status != null && status !== '')) ? (
+        <div className="sa-record-hero-status">
+          {badge || <SaStatusBadge status={status} />}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Dates that apply to this record. Pass at=null to show an em dash. Omit a step that does not apply. */
+export function SaRecordTimeline({ steps }) {
+  const rows = (steps || []).filter(step => step && step.label);
+  if (!rows.length) return null;
+  return (
+    <ol className="premium-card sa-record-timeline" aria-label="Dates">
+      {rows.map((step) => {
+        const missing = step.at == null || step.at === '' || step.at === '—';
+        return (
+          <li key={step.label} className="sa-record-step">
+            <span className="sa-record-step-label">{step.label}</span>
+            <span className="sa-record-step-value">{missing ? '—' : step.at}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+export function SaRecordSection({ title, children }) {
+  return (
+    <section className="premium-card sa-record-section">
+      <h3 className="sa-record-section-title">{title}</h3>
+      <div className="sa-record-facts">{children}</div>
+    </section>
+  );
+}
+
+export function SaMoreInfo({ children, summary = 'More info' }) {
+  const items = React.Children.toArray(children).filter(Boolean);
+  if (!items.length) return null;
+  return (
+    <details className="premium-card sa-more-info">
+      <summary>{summary}</summary>
+      <div className="sa-record-facts">{items}</div>
+    </details>
+  );
+}
+
+export function SaHelper({ children }) {
+  if (children == null || children === false || children === '') return null;
+  return <p className="sa-record-helper">{children}</p>;
+}
+
+export function SaRecordActions({ children }) {
+  const items = React.Children.toArray(children).filter(Boolean);
+  if (!items.length) return null;
+  return <div className="sa-record-actions">{items}</div>;
 }
