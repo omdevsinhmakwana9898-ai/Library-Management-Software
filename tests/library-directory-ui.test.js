@@ -74,6 +74,12 @@ test('per-library analytics is where customer fees and seat use are shown', () =
   assert.match(analytics, /export\.csv/);
   assert.match(analytics, /sa-analytics-filters-button/);
   assert.match(analytics, /sa-analytics-filters-menu/);
+  assert.match(analytics, /DatePeriodSelect/);
+  assert.match(analytics, /sa-analytics-filters-period/);
+  assert.match(analytics, /period: 'all_time'/);
+  assert.match(analytics, /resolveDatePeriod/);
+  assert.match(analytics, /!== 'all_time'/);
+  assert.doesNotMatch(analytics, /type="date"/);
   assert.match(analytics, /<span>CSV<\/span>/);
   assert.doesNotMatch(analytics, /gridTemplateColumns: 'repeat\(auto-fit, minmax\(140px, 1fr\)\)'/);
   assert.match(dash, /page: 'analytics'/);

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Download, Lock, ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, downloadFile } from '../utils/api';
-import { FiltersMenu } from './FiltersMenu';
+import { DatePeriodSelect, FiltersMenu, datePeriodLabel, resolveDatePeriod } from './FiltersMenu';
 
 const inr = (n) => `₹${Math.round(Number(n || 0)).toLocaleString('en-IN')}`;
 const Stat = ({ label, value, sub }) => (
@@ -52,7 +52,7 @@ export function PlatformInsightsOverview() {
   );
 }
 
-const blankAnalytics = { from: '', to: '', branchId: '', sectionId: '' };
+const blankAnalytics = { period: 'all_time', from: '', to: '', branchId: '', sectionId: '' };
 const stackLabel = { margin: 0, display: 'flex', flexDirection: 'column', gap: 4 };
 
 /** One library’s operational analytics. Customer fees stay in this view. */
@@ -64,9 +64,16 @@ export function LibraryAnalytics({ libraryId, libraryName, onBack }) {
   const qs = (o) => {
     const p = new URLSearchParams();
     if (libraryId) p.set('libraryId', libraryId);
-    Object.entries(o).forEach(([k, v]) => v && p.set(k, v));
+    for (const k of ['from', 'to', 'branchId', 'sectionId']) if (o[k]) p.set(k, o[k]);
     const s = p.toString();
     return s ? `?${s}` : '';
+  };
+  const withBounds = (next) => {
+    const period = next.period || 'all_time';
+    if (period === 'custom') return { ...next, period, from: next.from || '', to: next.to || '' };
+    if (period === 'all_time') return { ...next, period, from: '', to: '' };
+    const range = resolveDatePeriod(period);
+    return { ...next, period, from: range?.from || '', to: range?.to || '' };
   };
   const load = useCallback(async (filters) => {
     if (!libraryId) return;
@@ -91,7 +98,7 @@ export function LibraryAnalytics({ libraryId, libraryName, onBack }) {
   const branchName = branches.find(b => b.branchId === applied.branchId)?.name || applied.branchId;
   const sectionName = (data?.catalog?.sections || []).find(s => s.sectionId === applied.sectionId)?.name || applied.sectionId;
   const chips = [
-    (applied.from || applied.to) && { key: 'period', label: `${applied.from || '…'} – ${applied.to || '…'}`, onDismiss: () => commit({ ...applied, from: '', to: '' }) },
+    applied.period && applied.period !== 'all_time' && { key: 'period', label: datePeriodLabel(applied.period, applied), onDismiss: () => commit({ ...applied, period: 'all_time', from: '', to: '' }) },
     applied.branchId && { key: 'branch', label: branchName, onDismiss: () => commit({ ...applied, branchId: '', sectionId: '' }) },
     applied.sectionId && { key: 'section', label: sectionName, onDismiss: () => commit({ ...applied, sectionId: '' }) },
   ].filter(Boolean);
@@ -115,13 +122,20 @@ export function LibraryAnalytics({ libraryId, libraryName, onBack }) {
             buttonId="sa-analytics-filters-button"
             menuId="sa-analytics-filters-menu"
             chips={chips}
-            onApply={(e) => { e?.preventDefault(); setApplied({ ...draft }); }}
+            onApply={(e) => { e?.preventDefault(); setApplied(withBounds(draft)); }}
             onReset={() => commit(blankAnalytics)}
             onClose={() => setDraft(applied)}
             applyDisabled={loading}
           >
-            <label className="form-label" style={stackLabel}>From<input className="form-input" type="date" value={draft.from} onChange={set('from')} /></label>
-            <label className="form-label" style={stackLabel}>To<input className="form-input" type="date" value={draft.to} onChange={set('to')} /></label>
+            <DatePeriodSelect
+              id="sa-analytics-filters-period"
+              value={draft.period || 'all_time'}
+              onChange={(period) => setDraft(x => ({ ...x, period }))}
+              from={draft.from}
+              to={draft.to}
+              onFromChange={(from) => setDraft(x => ({ ...x, from }))}
+              onToChange={(to) => setDraft(x => ({ ...x, to }))}
+            />
             <label className="form-label" style={stackLabel}>Branch
               <select className="form-input" value={draft.branchId} onChange={set('branchId')}>
                 <option value="">All branches</option>
