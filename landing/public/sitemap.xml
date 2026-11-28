@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://mylibraryos.in/</loc></url>
+  <url><loc>https://mylibraryos.in/login</loc></url>
+  <url><loc>https://mylibraryos.in/signup</loc></url>
+  <url><loc>https://mylibraryos.in/free-trial</loc></url>
+  <url><loc>https://mylibraryos.in/pricing</loc></url>
+  <url><loc>https://mylibraryos.in/demo</loc></url>
   <url><loc>https://mylibraryos.in/privacy</loc></url>
   <url><loc>https://mylibraryos.in/terms</loc></url>
   <url><loc>https://mylibraryos.in/refund</loc></url>

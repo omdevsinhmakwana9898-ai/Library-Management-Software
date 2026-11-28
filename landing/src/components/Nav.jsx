@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Menu, X } from 'lucide-react';
-import { APP_URL, BRAND } from '../config.js';
+import { BRAND, LOGIN_PATH, FREE_TRIAL_PATH } from '../config.js';
 
 const links = [
   ['Features', '#features'],
@@ -50,10 +50,10 @@ export default function Nav({ home = true }) {
           ))}
         </ul>
         <div className="hidden items-center gap-2 lg:flex">
-          <a href={APP_URL} className="cursor-pointer rounded-lg px-3 py-2 text-sm font-semibold text-stone-200 transition-colors hover:text-white">
+          <a href={LOGIN_PATH} className="cursor-pointer rounded-lg px-3 py-2 text-sm font-semibold text-stone-200 transition-colors hover:text-white">
             Sign in
           </a>
-          <a href={APP_URL} className="btn-gold !px-4 !py-2 !text-sm">
+          <a href={FREE_TRIAL_PATH} className="btn-gold !px-4 !py-2 !text-sm">
             Start free trial
           </a>
         </div>
@@ -79,8 +79,8 @@ export default function Nav({ home = true }) {
             ))}
           </ul>
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <a href={APP_URL} className="btn-ghost-dark">Sign in</a>
-            <a href={APP_URL} className="btn-gold">Start free trial</a>
+            <a href={LOGIN_PATH} className="btn-ghost-dark">Sign in</a>
+            <a href={FREE_TRIAL_PATH} className="btn-gold">Start free trial</a>
           </div>
         </div>
       )}

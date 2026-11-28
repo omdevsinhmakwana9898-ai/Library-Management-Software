@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
-import { APP_URL, DEMO_PATH } from '../config.js';
+import { DEMO_PATH, FREE_TRIAL_PATH } from '../config.js';
 import { catalogueUrl, formatInrFromMinor, intervalPrice, recommendedId } from '../planCatalogue.js';
 import { Reveal, SectionHeading } from './ui.jsx';
 
@@ -111,7 +111,7 @@ export default function Pricing() {
                     </li>
                   ))}
                 </ul>
-                <a href={APP_URL} className={`mt-8 w-full ${featured ? 'btn-gold' : 'btn-outline'}`}>Start Free Trial</a>
+                <a href={FREE_TRIAL_PATH} className={`mt-8 w-full ${featured ? 'btn-gold' : 'btn-outline'}`}>Start Free Trial</a>
               </Reveal>
             );
           })}

@@ -4,15 +4,18 @@ import { api } from '../utils/api';
 import { SignupPlanPicker } from './SignupPlanPicker';
 import { ContactChoices } from '../components/ContactChoices';
 import { intervalOffered } from '../utils/softwarePlanForm';
+import { readSignupIntent } from './signupIntent';
 
-export function SignupPanel({ plans = [], googleSignup = false, mobileSignupAvailable = false, paymentsConfigured = false, googlePendingToken = '', onDone, onBack }) {
+export function SignupPanel({ plans = [], googleSignup = false, mobileSignupAvailable = false, paymentsConfigured = false, googlePendingToken = '', initialPlanId = '', onDone, onBack }) {
   const [step, setStep] = useState(googlePendingToken ? 2 : 1); // 1 verify, 2 details, 3 payment
   const [channel, setChannel] = useState('email'); // email | mobile
   const [email, setEmail] = useState('');
   const [mobile, setMobile] = useState('');
   const [code, setCode] = useState('');
   const [pendingToken, setPendingToken] = useState(googlePendingToken || '');
-  const [planId, setPlanId] = useState(plans[0]?.planId || '');
+  const [planId, setPlanId] = useState(() => (
+    (initialPlanId && plans.some((item) => item.planId === initialPlanId)) ? initialPlanId : (plans[0]?.planId || '')
+  ));
   const [interval, setInterval] = useState('month');
   const [touchedInterval, setTouchedInterval] = useState(false);
   const [name, setName] = useState('');
@@ -44,6 +47,11 @@ export function SignupPanel({ plans = [], googleSignup = false, mobileSignupAvai
     try { setReferralCode(decodeURIComponent(match[1]).toUpperCase()); } catch { /* keep the field empty */ }
     return undefined;
   }, []);
+
+  useEffect(() => {
+    const wanted = initialPlanId || readSignupIntent().planId;
+    if (wanted && (plans || []).some((item) => item.planId === wanted)) setPlanId(wanted);
+  }, [initialPlanId, plans]);
 
   useEffect(() => {
     if (step === 2 && !viaGoogle) setResendWait(30);

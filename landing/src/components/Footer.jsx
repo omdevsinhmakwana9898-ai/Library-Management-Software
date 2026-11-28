@@ -1,5 +1,5 @@
 import { ArrowRight, CalendarClock } from 'lucide-react';
-import { APP_URL, DEMO_PATH, DEMO_EMAIL } from '../config.js';
+import { DEMO_PATH, DEMO_EMAIL, LOGIN_PATH, SIGNUP_PATH, FREE_TRIAL_PATH, PRICING_PATH } from '../config.js';
 import { Logo } from './Nav.jsx';
 import { Reveal } from './ui.jsx';
 
@@ -17,7 +17,7 @@ export function FinalCTA() {
             Set up your seats, shifts and fee plans, then run the whole library from one screen.
           </p>
           <div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row">
-            <a href={APP_URL} className="btn-gold group !px-7 !py-3.5 !text-base">
+            <a href={FREE_TRIAL_PATH} className="btn-gold group !px-7 !py-3.5 !text-base">
               Start free trial <ArrowRight size={18} className="transition-transform group-hover:translate-x-0.5" />
             </a>
             <a href={DEMO_PATH} className="btn-ghost-dark !px-7 !py-3.5 !text-base">
@@ -33,8 +33,8 @@ export function FinalCTA() {
 export default function Footer({ home = true }) {
   const hash = (id) => (home ? id : `/${id}`);
   const cols = [
-    ['Product', [['Features', hash('#features')], ['Product tour', hash('#product')], ['Pricing', hash('#pricing')]]],
-    ['Get started', [['Start free trial', APP_URL], ['Sign in', APP_URL], ['Book a demo', DEMO_PATH], ['FAQ', hash('#faq')]]],
+    ['Product', [['Features', hash('#features')], ['Product tour', hash('#product')], ['Pricing', PRICING_PATH]]],
+    ['Get started', [['Start free trial', FREE_TRIAL_PATH], ['Create account', SIGNUP_PATH], ['Sign in', LOGIN_PATH], ['Book a demo', DEMO_PATH], ['FAQ', hash('#faq')]]],
     ['Legal', [
       ['Privacy Policy', '/privacy'],
       ['Terms & Conditions', '/terms'],

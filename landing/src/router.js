@@ -4,7 +4,7 @@ import { DEMO_PATH } from './config.js';
 /** Public origin used in canonical and social tags. Never empty. */
 export const SITE_ORIGIN = (import.meta.env.VITE_SITE_URL || 'https://mylibraryos.in').replace(/\/$/, '');
 
-export const HOME_TITLE = 'My Library OS – library management software for study libraries in India';
+export const HOME_TITLE = 'My Library OS (mylibraryos.in) – library management software for study libraries in India';
 export const HOME_DESCRIPTION = HOME_TITLE;
 
 /** Path → document title for legal pages. Home and /demo are the other client routes. */
