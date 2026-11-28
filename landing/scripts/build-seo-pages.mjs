@@ -62,7 +62,7 @@ function escapeHtml(value) {
     .replaceAll('"', '&quot;');
 }
 
-function planCards(plans, { selectable = false, ctaHref = '', ctaLabel = 'Start free trial' } = {}) {
+function planCards(plans, { selectable = false, ctaHref = '', ctaHrefForPlan, ctaLabel = 'Start free trial' } = {}) {
   return plans.map((plan) => {
     const month = intervalOf(plan, 'month');
     const year = intervalOf(plan, 'year');
@@ -86,7 +86,7 @@ function planCards(plans, { selectable = false, ctaHref = '', ctaLabel = 'Start 
         ${body}
       </label>`;
     }
-    const href = ctaHref || '#';
+    const href = (typeof ctaHrefForPlan === 'function' ? ctaHrefForPlan(plan) : ctaHref) || '#';
     return `<article class="plan${plan.recommended ? ' recommended' : ''}">
       ${body}
       <a class="btn ${plan.recommended ? 'btn-gold' : 'btn-outline'}" style="margin-top:16px" href="${escapeHtml(href)}">${escapeHtml(ctaLabel)}</a>
@@ -314,10 +314,10 @@ async function main() {
       title: 'Pricing - My Library OS (mylibraryos.in)',
       description: 'My Library OS pricing for study libraries in India. Compare plans and start a free trial — you only choose a plan, and no payment is needed to begin.',
       heading: 'My Library OS pricing',
-      lead: 'Simple plans for reading libraries and study rooms in India. Every plan includes a free trial. On the free trial page you only choose a plan — you do not pay to start.',
+      lead: 'Simple plans for reading libraries and study rooms in India. Every plan includes a free trial. Select a plan to continue — it starts as a free trial, and no payment is needed now.',
       content: `
-        <p class="note">Prices below are our current public plans. Starting a free trial does not require payment.</p>
-        <div class="plans">${planCards(plans, { ctaHref: '/free-trial', ctaLabel: 'Start free trial' })}</div>
+        <p class="note"><strong>No payment is needed now.</strong> Select a plan to move forward. The plan starts as a free trial, and you do not pay to begin.</p>
+        <div class="plans">${planCards(plans, { ctaLabel: 'Select plan', ctaHrefForPlan: (plan) => signupUrl(app, plan.planId) })}</div>
         <div class="actions">
           <a class="btn btn-outline" href="/demo">Book a demo</a>
         </div>
