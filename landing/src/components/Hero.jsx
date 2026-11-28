@@ -1,7 +1,7 @@
 import { useReducedMotion } from 'framer-motion';
 import { ArrowRight, CalendarClock } from 'lucide-react';
 import Scene3D from './Scene3D.jsx';
-import { APP_URL, DEMO_PATH } from '../config.js';
+import { APP_URL, DEMO_PATH, FREE_TRIAL_PATH } from '../config.js';
 
 export default function Hero() {
   const reduced = useReducedMotion();
@@ -26,7 +26,7 @@ export default function Hero() {
             The front desk for reading libraries: seats, shifts, admissions and fees, live on one screen.
           </p>
           <div className="mx-auto mt-7 grid w-full max-w-md grid-cols-2 gap-3 md:mt-8 xl:mx-0 xl:max-w-none xl:flex xl:items-center">
-            <a href={APP_URL} className="btn-gold group !px-3 !py-3.5 !text-[15px] sm:!px-6 sm:!text-base">
+            <a href={FREE_TRIAL_PATH} className="btn-gold group !px-3 !py-3.5 !text-[15px] sm:!px-6 sm:!text-base">
               Start free trial <ArrowRight size={18} className="transition-transform group-hover:translate-x-0.5" />
             </a>
             <a href={DEMO_PATH} className="btn-ghost-dark !px-3 !py-3.5 !text-[15px] sm:!px-6 sm:!text-base">

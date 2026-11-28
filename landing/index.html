@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Library OS – library management software for study libraries in India</title>
-    <meta name="description" content="My Library OS – library management software for study libraries in India" />
+    <title>My Library OS (mylibraryos.in) – library management software for study libraries in India</title>
+    <meta name="description" content="My Library OS (mylibraryos.in) – library management software for study libraries in India" />
     <meta name="theme-color" content="#0C0A09" />
     <link rel="canonical" href="__SITE_URL__/" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
@@ -14,27 +14,75 @@
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="My Library OS" />
-    <meta property="og:title" content="My Library OS – library management software for study libraries in India" />
-    <meta property="og:description" content="My Library OS – library management software for study libraries in India" />
+    <meta property="og:title" content="My Library OS (mylibraryos.in) – library management software for study libraries in India" />
+    <meta property="og:description" content="My Library OS (mylibraryos.in) – library management software for study libraries in India" />
     <meta property="og:url" content="__SITE_URL__/" />
     <meta property="og:image" content="__SITE_URL__/og-image.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="My Library OS – library management software for study libraries in India" />
-    <meta name="twitter:description" content="My Library OS – library management software for study libraries in India" />
+    <meta name="twitter:title" content="My Library OS (mylibraryos.in) – library management software for study libraries in India" />
+    <meta name="twitter:description" content="My Library OS (mylibraryos.in) – library management software for study libraries in India" />
     <meta name="twitter:image" content="__SITE_URL__/og-image.png" />
 
     <link rel="preload" href="/fonts/Satoshi-900.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/GeneralSans-400.woff2" as="font" type="font/woff2" crossorigin />
 
     <script type="application/ld+json">
-      {"@context":"https://schema.org","@type":"SoftwareApplication","name":"My Library OS","applicationCategory":"BusinessApplication","operatingSystem":"Web","description":"Management software for reading libraries and study rooms: seat map, shifts, admissions, payments, receipts, expenses, reports and multi-branch oversight."}
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "name": "My Library OS",
+            "alternateName": ["MyLibraryOS", "mylibraryos.in"],
+            "url": "__SITE_URL__/",
+            "logo": "__SITE_URL__/logo-icon.png"
+          },
+          {
+            "@type": "WebSite",
+            "name": "My Library OS",
+            "alternateName": ["MyLibraryOS", "mylibraryos.in"],
+            "url": "__SITE_URL__/"
+          },
+          {
+            "@type": "ItemList",
+            "name": "My Library OS site navigation",
+            "itemListElement": [
+              { "@type": "SiteNavigationElement", "position": 1, "name": "Sign in", "url": "__SITE_URL__/login" },
+              { "@type": "SiteNavigationElement", "position": 2, "name": "Create account", "url": "__SITE_URL__/signup" },
+              { "@type": "SiteNavigationElement", "position": 3, "name": "Free trial", "url": "__SITE_URL__/free-trial" },
+              { "@type": "SiteNavigationElement", "position": 4, "name": "Features", "url": "__SITE_URL__/features" },
+              { "@type": "SiteNavigationElement", "position": 5, "name": "Pricing", "url": "__SITE_URL__/pricing" }
+            ]
+          },
+          {
+            "@type": "SoftwareApplication",
+            "name": "My Library OS",
+            "alternateName": ["MyLibraryOS", "mylibraryos.in"],
+            "applicationCategory": "BusinessApplication",
+            "operatingSystem": "Web",
+            "url": "__SITE_URL__/",
+            "description": "Management software for reading libraries and study rooms: seat map, shifts, admissions, payments, receipts, expenses, reports and multi-branch oversight."
+          }
+        ]
+      }
     </script>
   </head>
   <body class="bg-ink-950 text-stone-100 antialiased">
-    <div id="root"></div>
-    <noscript>My Library OS — management software for reading libraries and study rooms. Please enable JavaScript.</noscript>
+    <div id="root">
+      <h1>My Library OS (mylibraryos.in)</h1>
+      <p>Library management software for study libraries and reading rooms in India. Seat maps, shifts, admissions, payments and reports.</p>
+      <p>
+        <a href="/login">Sign in</a>
+        <a href="/signup">Create account</a>
+        <a href="/free-trial">Get a free trial</a>
+        <a href="/features">Features</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/demo">Book a demo</a>
+      </p>
+    </div>
+    <noscript>My Library OS (mylibraryos.in) — management software for reading libraries and study rooms. Please enable JavaScript, or use Sign in, Create account, Free trial, Features and Pricing from the links above.</noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

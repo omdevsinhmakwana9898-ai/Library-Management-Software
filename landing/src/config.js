@@ -3,3 +3,9 @@ export const DEMO_EMAIL = import.meta.env.VITE_DEMO_EMAIL || 'mylibraryosadmin@g
 /** In-site demo request form. Support and legal pages still use DEMO_EMAIL as a mailto. */
 export const DEMO_PATH = '/demo';
 export const BRAND = 'My Library OS';
+
+export const LOGIN_PATH = '/login';
+export const SIGNUP_PATH = '/signup';
+export const FREE_TRIAL_PATH = '/free-trial';
+export const FEATURES_PATH = '/features';
+export const PRICING_PATH = '/pricing';

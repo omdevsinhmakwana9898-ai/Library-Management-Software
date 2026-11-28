@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { useAuth, googleOAuthErrorMessage } from './AuthContext';
 import { api } from '../utils/api';
 import { SignupPanel } from './SignupPanel';
+import { readSignupIntent } from './signupIntent';
 import { ContactChoices } from '../components/ContactChoices';
 import { readInviteToken } from '../utils/inviteToken';
 
@@ -39,7 +40,8 @@ export function LoginScreen({ existingUser = null } = {}) {
   const [signup, setSignup] = useState(null);
 
   // 'login' | 'forgot' | 'invite'
-  const [mode, setMode] = useState(() => (readInviteToken() ? 'invite' : ((typeof window !== 'undefined' && /[?&]referral=/.test(window.location.hash || '')) ? 'signup' : 'login')));
+  const signupIntent = readSignupIntent();
+  const [mode, setMode] = useState(() => (readInviteToken() ? 'invite' : (signupIntent.openSignup ? 'signup' : 'login')));
   const [inviteToken] = useState(readInviteToken);
 
   // Forgot password: email, mobile, or linked Google.
@@ -327,6 +329,7 @@ export function LoginScreen({ existingUser = null } = {}) {
         {mode === 'signup' && signup && (
           <SignupPanel
             plans={signup.plans || []}
+            initialPlanId={signupIntent.planId}
             googleSignup={Boolean(signup.googleSignup)}
             paymentsConfigured={Boolean(signup.paymentsConfigured)}
             mobileSignupAvailable={Boolean(signup.mobileSignupAvailable ?? signup.mobileSignup)}
