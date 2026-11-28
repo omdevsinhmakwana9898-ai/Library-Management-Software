@@ -1,5 +1,5 @@
 import { ArrowRight, CalendarClock } from 'lucide-react';
-import { DEMO_PATH, DEMO_EMAIL, LOGIN_PATH, SIGNUP_PATH, FREE_TRIAL_PATH, PRICING_PATH } from '../config.js';
+import { DEMO_PATH, DEMO_EMAIL, LOGIN_PATH, SIGNUP_PATH, FREE_TRIAL_PATH, FEATURES_PATH, PRICING_PATH } from '../config.js';
 import { Logo } from './Nav.jsx';
 import { Reveal } from './ui.jsx';
 
@@ -33,8 +33,8 @@ export function FinalCTA() {
 export default function Footer({ home = true }) {
   const hash = (id) => (home ? id : `/${id}`);
   const cols = [
-    ['Product', [['Features', hash('#features')], ['Product tour', hash('#product')], ['Pricing', PRICING_PATH]]],
-    ['Get started', [['Start free trial', FREE_TRIAL_PATH], ['Create account', SIGNUP_PATH], ['Sign in', LOGIN_PATH], ['Book a demo', DEMO_PATH], ['FAQ', hash('#faq')]]],
+    ['Product', [['Features', FEATURES_PATH], ['Product tour', hash('#product')], ['Pricing', PRICING_PATH]]],
+    ['Get started', [['Sign in', LOGIN_PATH], ['Create account', SIGNUP_PATH], ['Free trial', FREE_TRIAL_PATH], ['Features', FEATURES_PATH], ['Pricing', PRICING_PATH], ['Book a demo', DEMO_PATH], ['FAQ', hash('#faq')]]],
     ['Legal', [
       ['Privacy Policy', '/privacy'],
       ['Terms & Conditions', '/terms'],

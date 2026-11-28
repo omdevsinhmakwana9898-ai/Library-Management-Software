@@ -7,4 +7,5 @@ export const BRAND = 'My Library OS';
 export const LOGIN_PATH = '/login';
 export const SIGNUP_PATH = '/signup';
 export const FREE_TRIAL_PATH = '/free-trial';
+export const FEATURES_PATH = '/features';
 export const PRICING_PATH = '/pricing';

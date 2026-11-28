@@ -1,5 +1,5 @@
 /**
- * Writes static HTML for /login, /signup, /free-trial and /pricing so the first
+ * Writes static HTML for /login, /signup, /free-trial, /features and /pricing so the first
  * response contains a real title, description, canonical and visible content.
  * Prices come from the public catalogue (live API, then the committed snapshot).
  * This script never changes prices; it only displays what the catalogue already has.
@@ -145,10 +145,11 @@ function pageTemplate({
           <span>My Library <span class="os">OS</span></span>
         </a>
         <nav class="nav-links" aria-label="Main">
-          <a href="/pricing">Pricing</a>
-          <a href="/demo">Book a demo</a>
           <a href="/login">Sign in</a>
-          <a class="btn btn-gold" style="padding:8px 14px;font-size:14px" href="/free-trial">Start free trial</a>
+          <a href="/signup">Create account</a>
+          <a href="/free-trial">Free trial</a>
+          <a href="/features">Features</a>
+          <a href="/pricing">Pricing</a>
         </nav>
       </div>
     </header>
@@ -165,10 +166,11 @@ function pageTemplate({
       <div class="wrap">
         <p>© ${new Date().getFullYear()} My Library OS (mylibraryos.in). All rights reserved.</p>
         <p>
-          <a href="/signup">Create account</a> ·
           <a href="/login">Sign in</a> ·
-          <a href="/pricing">Pricing</a> ·
+          <a href="/signup">Create account</a> ·
           <a href="/free-trial">Free trial</a> ·
+          <a href="/features">Features</a> ·
+          <a href="/pricing">Pricing</a> ·
           <a href="/privacy">Privacy</a>
         </p>
       </div>
@@ -254,7 +256,59 @@ async function main() {
         </script>
       `,
     }),
-    pricing: pageTemplate({
+    features: pageTemplate({
+      site,
+      path: '/features',
+      title: 'Features - My Library OS (mylibraryos.in)',
+      description: 'My Library OS features for reading libraries and study rooms: live seat map, shifts and timings, student admissions, printable receipts, expenses, payments, reports, and branches.',
+      heading: 'Everything a reading library runs on',
+      lead: 'The tools a study room uses every day, from the seat map to the monthly numbers.',
+      content: `
+        <div class="feature-list">
+          <article>
+            <h2>Live seat map</h2>
+            <p>See which seats are taken, free or under maintenance, and assign one for the right shift.</p>
+          </article>
+          <article>
+            <h2>Shifts &amp; timings</h2>
+            <p>Morning, evening or full-day shifts, each with its own fee.</p>
+          </article>
+          <article>
+            <h2>Student admissions</h2>
+            <p>Admit students with their documents, in bulk or one at a time.</p>
+          </article>
+          <article>
+            <h2>Printable receipts</h2>
+            <p>Print a receipt with your library’s details at the desk.</p>
+          </article>
+          <article>
+            <h2>Expenses</h2>
+            <p>Log rent, salaries and supplies next to what you collect.</p>
+          </article>
+          <article>
+            <h2>Payments &amp; split payments</h2>
+            <p>Take a fee in cash, UPI, card, or a mix of all three.</p>
+          </article>
+          <article>
+            <h2>Reports &amp; P&amp;L</h2>
+            <p>Collections, expenses and profit for the month, side by side.</p>
+          </article>
+          <article>
+            <h2>Branches &amp; permissions</h2>
+            <p>Manage every branch in one place, with secure role-based permissions so each person only sees their work.</p>
+          </article>
+          <article>
+            <h2>Google sign-in</h2>
+            <p>Sign in with Google. The email on the account sets the role.</p>
+          </article>
+        </div>
+        <div class="actions">
+          <a class="btn btn-gold" href="/free-trial">Start free trial</a>
+          <a class="btn btn-outline" href="/pricing">Pricing</a>
+        </div>
+      `,
+    }),
+        pricing: pageTemplate({
       site,
       path: '/pricing',
       title: 'Pricing - My Library OS (mylibraryos.in)',

@@ -5,6 +5,7 @@ const SEO_PAGES = {
   '/login': '/login/index.html',
   '/signup': '/signup/index.html',
   '/free-trial': '/free-trial/index.html',
+  '/features': '/features/index.html',
   '/pricing': '/pricing/index.html',
 };
 

@@ -40,6 +40,14 @@
       "destination": "/free-trial/index.html"
     },
     {
+      "source": "/features",
+      "destination": "/features/index.html"
+    },
+    {
+      "source": "/features/",
+      "destination": "/features/index.html"
+    },
+    {
       "source": "/pricing",
       "destination": "/pricing/index.html"
     },
